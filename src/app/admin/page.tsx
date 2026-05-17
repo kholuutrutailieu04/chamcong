@@ -574,6 +574,26 @@ function EmployeeEditModal({
 function ConfigTab() {
   const [configs, setConfigs] = useState<SystemConfig[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generatingOtp, setGeneratingOtp] = useState(false);
+  const [masterOtp, setMasterOtp] = useState<string | null>(null);
+
+  const generateMasterOtp = async () => {
+    if (!confirm('Bạn có chắc muốn sinh ra một mã OTP khẩn cấp dùng chung cho tất cả nhân viên? (Có hiệu lực 10 phút)')) return;
+    setGeneratingOtp(true);
+    try {
+      const res = await fetch('/api/admin/generate-master-otp', { method: 'POST' });
+      const data = await res.json();
+      if (res.ok) {
+        setMasterOtp(data.otp);
+        fetchConfigs(); // Refresh configs list to show the new OTP in the list as well (optional)
+      } else {
+        alert('Lỗi: ' + data.error);
+      }
+    } catch {
+      alert('Lỗi kết nối.');
+    }
+    setGeneratingOtp(false);
+  };
 
   const fetchConfigs = async () => {
     setLoading(true);
@@ -602,9 +622,33 @@ function ConfigTab() {
 
   return (
     <div className="space-y-6 animate-fade-in max-w-4xl">
-      <header className="border-b border-slate-200 pb-4">
-        <h2 className="text-2xl font-bold font-outfit text-slate-800">Biến Hệ Thống & Cấu Hình</h2>
-        <p className="text-sm text-slate-500 mt-1">Thay đổi các thông số kỹ thuật hoạt động của Bot tự động</p>
+      <header className="border-b border-slate-200 pb-4 flex justify-between items-start">
+        <div>
+          <h2 className="text-2xl font-bold font-outfit text-slate-800">Biến Hệ Thống & Cấu Hình</h2>
+          <p className="text-sm text-slate-500 mt-1">Thay đổi các thông số kỹ thuật hoạt động của Bot tự động</p>
+        </div>
+        
+        <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl max-w-sm text-center shadow-sm">
+          <h3 className="font-bold text-rose-700 flex items-center justify-center gap-2 mb-2">
+            <ShieldAlert size={18} /> Cấp Mã OTP Khẩn Cấp
+          </h3>
+          <p className="text-xs text-rose-600 mb-3 leading-relaxed">
+            Dùng khi nhân viên bị lỗi không nhận được email. Mã dùng chung toàn viện và có thời hạn 10 phút.
+          </p>
+          <button 
+            onClick={generateMasterOtp}
+            disabled={generatingOtp}
+            className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 rounded-lg text-sm transition"
+          >
+            {generatingOtp ? 'Đang tạo...' : 'Tạo Mã Ngay'}
+          </button>
+          {masterOtp && (
+            <div className="mt-4 pt-4 border-t border-rose-200 animate-fade-in">
+              <p className="text-xs font-semibold text-rose-600 uppercase tracking-wider mb-1">Mã của bạn</p>
+              <p className="text-4xl font-mono font-black text-rose-800 tracking-[0.2em]">{masterOtp}</p>
+            </div>
+          )}
+        </div>
       </header>
 
       {loading ? <p>Loading...</p> : (

@@ -16,9 +16,8 @@ const supabaseAuthClient = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-function generateOtp(): string {
-  return String(Math.floor(100000 + Math.random() * 900000));
-}
+// Bỏ hàm generateOtp tự tạo mã
+
 
 export async function POST(req: NextRequest) {
   const admin = getAdminClient();
@@ -26,20 +25,13 @@ export async function POST(req: NextRequest) {
   try {
     const { ma_nv, email, device_id } = await req.json() as {
       ma_nv: string;
-      email: string;
-      device_id: string;
-    };
+    let targetEmail = email;
 
-    if (!ma_nv || !email || !device_id) {
+    if (!ma_nv || !device_id) {
       return NextResponse.json({ error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
     }
 
-    // Kiểm tra email hợp lệ (regex đơn giản)
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return NextResponse.json({ error: 'Email không hợp lệ.' }, { status: 400 });
-    }
-
-    // Kiểm tra nhân viên tồn tại
+    // Lấy thông tin nhân viên từ DB
     const { data: emp } = await admin
       .from('nhan_vien')
       .select('ma_nv, email')
@@ -50,52 +42,38 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Mã nhân viên không tồn tại.' }, { status: 404 });
     }
 
-    // Nếu nhân viên chưa có email trong DB -> Cập nhật email mới
-    if (!emp.email) {
-      await admin.from('nhan_vien').update({ email }).eq('ma_nv', ma_nv);
+    // Nếu front-end gửi lên email mới (lần đầu), cập nhật db
+    if (targetEmail) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(targetEmail)) {
+        return NextResponse.json({ error: 'Email không hợp lệ.' }, { status: 400 });
+      }
+      if (!emp.email || emp.email !== targetEmail) {
+        await admin.from('nhan_vien').update({ email: targetEmail }).eq('ma_nv', ma_nv);
+      }
+    } else {
+      // Nếu front-end không gửi email, lấy từ DB
+      if (!emp.email) {
+        return NextResponse.json({ error: 'Nhân viên chưa có email. Vui lòng đăng ký email.' }, { status: 400 });
+      }
+      targetEmail = emp.email;
     }
 
-    // Tạo OTP 6 số và lưu vào cau_hinh_he_thong với key tạm thời
-    const otp = generateOtp();
-    const otpKey = `OTP_${ma_nv}_${device_id}`;
-    const expireAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 phút
-
-    // Upsert OTP vào bảng cau_hinh_he_thong làm kho tạm
-    await admin.from('cau_hinh_he_thong').upsert(
-      {
-        key: otpKey,
-        value: otp,
-        mo_ta: `OTP tạm thời cho ${ma_nv} | Hết hạn: ${expireAt}`,
-        kieu_du_lieu: 'OTP_TEMP',
-        trang_thai: true,
-      },
-      { onConflict: 'key' }
-    );
-
-    // Gửi OTP qua Supabase Auth (sử dụng signInWithOtp)
-    // Đây là tính năng miễn phí của Supabase: gửi magic link email
+    // Gọi Supabase Auth gửi OTP nguyên bản qua email
     const { error: otpError } = await supabaseAuthClient.auth.signInWithOtp({
-      email,
+      email: targetEmail,
       options: {
-        // Cho phép tạo user nếu chưa tồn tại để tránh lỗi "Signups not allowed for otp"
-        // Nội dung email sẽ chứa OTP thủ công trong subject/body nếu cấu hình custom SMTP
         shouldCreateUser: true,
-        data: {
-          otp_code: otp,
-          ma_nv,
-        },
       },
     });
 
     if (otpError) {
-      // Fallback: Nếu Supabase Auth gặp lỗi, vẫn trả về thành công vì OTP đã được lưu
-      // Admin có thể tra OTP trong bảng cau_hinh_he_thong nếu cần
-      console.warn('[send-otp] Supabase Auth warning:', otpError.message);
+      console.warn('[send-otp] Supabase Auth error:', otpError.message);
+      return NextResponse.json({ error: 'Không thể gửi mã xác thực. Lỗi từ Supabase: ' + otpError.message }, { status: 500 });
     }
 
     return NextResponse.json({
       success: true,
-      message: `Mã xác thực đã được gửi đến ${email}. Có hiệu lực trong 10 phút.`,
+      message: `Mã xác thực đã được gửi đến ${targetEmail}. Có hiệu lực trong 10 phút.`,
     });
 
   } catch (err: unknown) {

@@ -7,6 +7,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req: NextRequest) {
   const admin = getAdminClient();
@@ -23,33 +24,48 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
     }
 
-    const otpKey = `OTP_${ma_nv}_${device_id}`;
-
-    // Lấy OTP đã lưu
-    const { data: otpRecord } = await admin
+    // Tầng 1: Kiểm tra Master OTP
+    const { data: masterOtpRecord } = await admin
       .from('cau_hinh_he_thong')
       .select('value, mo_ta')
-      .eq('key', otpKey)
+      .eq('key', 'MASTER_OTP')
       .single();
 
-    if (!otpRecord) {
-      return NextResponse.json({ error: 'Mã OTP không tồn tại hoặc đã hết hạn. Vui lòng yêu cầu mã mới.' }, { status: 400 });
-    }
-
-    // Kiểm tra hết hạn từ mo_ta
-    const expireMatch = otpRecord.mo_ta?.match(/Hết hạn: (.+)/);
-    if (expireMatch) {
-      const expireAt = new Date(expireMatch[1]);
-      if (new Date() > expireAt) {
-        // Xóa OTP hết hạn
-        await admin.from('cau_hinh_he_thong').delete().eq('key', otpKey);
-        return NextResponse.json({ error: 'Mã OTP đã hết hạn (10 phút). Vui lòng yêu cầu mã mới.' }, { status: 400 });
+    let isMasterOtpValid = false;
+    if (masterOtpRecord && masterOtpRecord.value === otp.trim()) {
+      const expireMatch = masterOtpRecord.mo_ta?.match(/Hết hạn: (.+)/);
+      if (expireMatch) {
+        const expireAt = new Date(expireMatch[1]);
+        if (new Date() <= expireAt) {
+          isMasterOtpValid = true;
+        } else {
+          // Xóa Master OTP hết hạn cho sạch DB (tùy chọn)
+          await admin.from('cau_hinh_he_thong').delete().eq('key', 'MASTER_OTP');
+        }
       }
     }
 
-    // So sánh OTP
-    if (otpRecord.value !== otp.trim()) {
-      return NextResponse.json({ error: 'Mã OTP không đúng.' }, { status: 400 });
+    if (!isMasterOtpValid) {
+      // Tầng 2: Kiểm tra OTP cá nhân qua Supabase Auth
+      const { data: empEmailRecord } = await admin.from('nhan_vien').select('email').eq('ma_nv', ma_nv).single();
+      if (!empEmailRecord || !empEmailRecord.email) {
+        return NextResponse.json({ error: 'Không tìm thấy email của nhân viên. Vui lòng đăng nhập lại từ đầu.' }, { status: 400 });
+      }
+
+      const supabaseAuthClient = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      const { error: verifyError } = await supabaseAuthClient.auth.verifyOtp({
+        email: empEmailRecord.email,
+        token: otp.trim(),
+        type: 'email'
+      });
+
+      if (verifyError) {
+        return NextResponse.json({ error: 'Mã OTP không đúng hoặc đã hết hạn.' }, { status: 400 });
+      }
     }
 
     // OTP hợp lệ: Lấy IP của request
@@ -129,8 +145,7 @@ export async function POST(req: NextRequest) {
       { onConflict: 'ma_nv,device_id' }
     );
 
-    // Xóa OTP tạm khỏi DB
-    await admin.from('cau_hinh_he_thong').delete().eq('key', otpKey);
+    // Ghi chú: Không cần xóa OTP tạm vì bây giờ dùng Supabase OTP hoặc Master OTP
 
     return NextResponse.json({
       success: true,
