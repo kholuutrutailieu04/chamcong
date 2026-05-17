@@ -73,10 +73,16 @@ const ADMIN_SESSION_KEY = 'admin_session_email';
 export default function AdminDashboardAuth() {
   const [adminEmail, setAdminEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [authed, setAuthed] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
-    return sessionStorage.getItem(ADMIN_SESSION_KEY);
-  });
+  const [authed, setAuthed] = useState<string | null>(null);
+  const [isClient, setIsClient] = useState(false);
+
+  useEffect(() => {
+    setIsClient(true);
+    const sessionEmail = sessionStorage.getItem(ADMIN_SESSION_KEY);
+    if (sessionEmail) {
+      setAuthed(sessionEmail);
+    }
+  }, []);
   const [checking, setChecking] = useState(false);
   const [authError, setAuthError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -117,6 +123,8 @@ export default function AdminDashboardAuth() {
     }
     setChecking(false);
   };
+
+  if (!isClient) return null;
 
   if (!authed) {
     return (
@@ -347,12 +355,18 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
   const handleSaveEmp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEmp) return;
+    
+    // Nếu xóa trắng thì chuyển thành null để không vi phạm ràng buộc Unique/Check của Database
+    const cleanPhone = editingEmp.so_dien_thoai?.trim() || null;
+    const cleanEmail = editingEmp.email?.trim() || null;
+
     const { error } = await supabase.from('nhan_vien').update({
-      so_dien_thoai: editingEmp.so_dien_thoai,
-      email: editingEmp.email
+      so_dien_thoai: cleanPhone,
+      email: cleanEmail
     }).eq('id', editingEmp.id);
+    
     if (error) {
-      alert('Lỗi cập nhật!');
+      alert(`Lỗi cập nhật: ${error.message}`);
     } else {
       setEditingEmp(null);
       fetchEmployees();
