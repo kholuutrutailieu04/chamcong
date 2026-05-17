@@ -11,8 +11,8 @@ export default function Home() {
 
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-20 flex flex-col items-center text-center">
         <div className="animate-fade-in flex flex-col items-center">
-          <div className="bg-white/80 backdrop-blur-md p-4 rounded-2xl shadow-xl mb-8 border border-white/50">
-            <img src="/logo.png" width={64} height={64} alt="Logo" />
+          <div className="mb-8 flex items-center justify-center">
+            <img src="/logo.png" width={80} height={80} alt="Logo" className="drop-shadow-xl" />
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold font-outfit tracking-tight mb-6">
