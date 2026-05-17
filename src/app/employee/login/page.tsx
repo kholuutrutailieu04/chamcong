@@ -309,7 +309,7 @@ function EmployeeLoginClient() {
               </div>
               <h2 className="text-2xl font-bold font-outfit uppercase tracking-tight">Nhập Mã OTP</h2>
               <p className="text-text-muted text-sm px-4 leading-relaxed">
-                Mã 6 chữ số đã được gửi đến email của bạn. Có hiệu lực trong 10 phút.
+                Mã xác thực đã được gửi đến email của bạn. Có hiệu lực trong 10 phút.
               </p>
             </div>
             <form onSubmit={handleVerifyOtp} className="space-y-6">
@@ -318,16 +318,16 @@ function EmployeeLoginClient() {
                 <input
                   type="text"
                   value={otp}
-                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').substring(0, 6))}
-                  placeholder="000000"
-                  maxLength={6}
+                  onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').substring(0, 8))}
+                  placeholder="Nhập mã xác thực"
+                  maxLength={8}
                   className="w-full bg-white/50 border border-glass-border px-4 py-3 rounded-xl focus:ring-2 focus:ring-primary/20 outline-none transition-all text-center text-2xl font-mono tracking-widest"
                 />
               </div>
               {error && <ErrorBanner message={error} />}
               <button
                 type="submit"
-                disabled={loading || otp.length !== 6}
+                disabled={loading || otp.length < 6}
                 className="btn-primary w-full py-4 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {loading ? <Loader2 className="animate-spin" size={18} /> : <ShieldCheck size={18} />}
