@@ -360,16 +360,25 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
     const cleanPhone = editingEmp.so_dien_thoai?.trim() || null;
     const cleanEmail = editingEmp.email?.trim() || null;
 
-    const { error } = await supabase.from('nhan_vien').update({
-      so_dien_thoai: cleanPhone,
-      email: cleanEmail
-    }).eq('id', editingEmp.id);
-    
-    if (error) {
-      alert(`Lỗi cập nhật: ${error.message}`);
-    } else {
+    try {
+      const res = await fetch('/api/admin/data?type=employees', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: editingEmp.id,
+          email: cleanEmail,
+          so_dien_thoai: cleanPhone
+        })
+      });
+      const data = await res.json();
+      
+      if (!res.ok) throw new Error(data.error || 'Lỗi không xác định');
+      
       setEditingEmp(null);
       fetchEmployees();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Lỗi cập nhật';
+      alert(`Lỗi cập nhật: ${msg}`);
     }
   };
 

@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 
 /**
@@ -78,12 +78,25 @@ export async function GET(req: NextRequest) {
  */
 export async function PATCH(req: NextRequest) {
   const type = req.nextUrl.searchParams.get('type');
-  if (type !== 'configs') {
-    return NextResponse.json({ error: 'Chỉ hỗ trợ PATCH type=configs' }, { status: 400 });
+  if (type !== 'configs' && type !== 'employees') {
+    return NextResponse.json({ error: 'Chỉ hỗ trợ PATCH type=configs hoặc type=employees' }, { status: 400 });
   }
 
   const admin = getAdminClient();
   try {
+    if (type === 'employees') {
+      const { id, email, so_dien_thoai } = await req.json();
+      if (!id) return NextResponse.json({ error: 'Thiếu ID nhân viên' }, { status: 400 });
+      
+      const { error } = await admin
+        .from('nhan_vien')
+        .update({ email, so_dien_thoai })
+        .eq('id', id);
+        
+      if (error) throw error;
+      return NextResponse.json({ success: true });
+    }
+
     const { key, value } = await req.json();
     if (!key || value === undefined) {
       return NextResponse.json({ error: 'Thiếu key hoặc value' }, { status: 400 });
