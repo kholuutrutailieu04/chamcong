@@ -1,7 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect, Suspense } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { User, LogIn, AlertCircle, Loader2, Mail, ShieldCheck } from 'lucide-react';
 
 type LoginStep = 'ENTER_ID' | 'ENTER_EMAIL' | 'ENTER_OTP' | 'FRAUD_WARNING';
@@ -36,8 +36,23 @@ function getDeviceName(): string {
 }
 
 export default function EmployeeLogin() {
+  return (
+    <Suspense fallback={
+      <main className="min-h-screen bg-bg-main flex items-center justify-center p-4">
+        <Loader2 className="animate-spin text-primary" size={40} />
+      </main>
+    }>
+      <EmployeeLoginClient />
+    </Suspense>
+  );
+}
+
+function EmployeeLoginClient() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [step, setStep] = useState<LoginStep>('ENTER_ID');
-  const [empId, setEmpId] = useState('');
+  const [empId, setEmpId] = useState(searchParams.get('emp_id') || '');
   const [email1, setEmail1] = useState('');
   const [email2, setEmail2] = useState('');
   const [otp, setOtp] = useState('');
@@ -45,7 +60,6 @@ export default function EmployeeLogin() {
   const [fraudWarning, setFraudWarning] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const router = useRouter();
 
   useEffect(() => {
     getDeviceId().then(setDeviceId);
@@ -79,7 +93,7 @@ export default function EmployeeLogin() {
 
       if (data.status === 'TRUSTED') {
         localStorage.setItem('employee_ma_nv', currentMaNv);
-        const redirect = new URLSearchParams(window.location.search).get('redirect');
+        const redirect = searchParams.get('redirect');
         router.push(redirect === 'attendance' ? '/attendance' : '/employee/dashboard');
         return;
       }
@@ -171,7 +185,7 @@ export default function EmployeeLogin() {
         return;
       }
 
-      const redirect = new URLSearchParams(window.location.search).get('redirect');
+      const redirect = searchParams.get('redirect');
       router.push(redirect === 'attendance' ? '/attendance' : '/employee/dashboard');
     } catch {
       setError('Lỗi kết nối máy chủ.');
@@ -352,7 +366,7 @@ export default function EmployeeLogin() {
             </div>
             <button
               onClick={() => {
-                const redirect = new URLSearchParams(window.location.search).get('redirect');
+                const redirect = searchParams.get('redirect');
                 router.push(redirect === 'attendance' ? '/attendance' : '/employee/dashboard');
               }}
               className="btn-primary w-full py-3"

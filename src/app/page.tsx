@@ -12,11 +12,11 @@ export default function Home() {
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-20 flex flex-col items-center text-center">
         <div className="animate-fade-in flex flex-col items-center">
           <div className="mb-8 flex items-center justify-center">
-            <img src="/logo.png" width={80} height={80} alt="Logo" className="drop-shadow-xl" />
+            <img src="/logo.png" width={100} height={100} alt="Logo" className="drop-shadow-xl" />
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold font-outfit tracking-tight mb-6">
-            ChamCong <span className="gradient-text">Smart V2</span>
+            ChamCong <span className="gradient-text">Smart</span>
           </h1>
 
           <p className="text-xl text-text-muted max-w-2xl mb-12 leading-relaxed">
