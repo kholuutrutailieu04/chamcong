@@ -25,6 +25,9 @@ export async function POST(req: NextRequest) {
   try {
     const { ma_nv, email, device_id } = await req.json() as {
       ma_nv: string;
+      email?: string;
+      device_id: string;
+    };
     let targetEmail = email;
 
     if (!ma_nv || !device_id) {
