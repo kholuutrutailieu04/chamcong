@@ -57,14 +57,29 @@ export async function POST(req: NextRequest) {
         process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
       );
 
-      const { error: verifyError } = await supabaseAuthClient.auth.verifyOtp({
-        email: empEmailRecord.email,
-        token: otp.trim(),
-        type: 'email'
-      });
+      const typesToTry: ('email' | 'magiclink' | 'signup')[] = ['email', 'magiclink', 'signup'];
+      let verifyError = null;
+      let isSuccess = false;
 
-      if (verifyError) {
-        return NextResponse.json({ error: 'Mã OTP không đúng hoặc đã hết hạn.' }, { status: 400 });
+      for (const type of typesToTry) {
+        const { error } = await supabaseAuthClient.auth.verifyOtp({
+          email: empEmailRecord.email,
+          token: otp.trim(),
+          type: type
+        });
+        
+        if (!error) {
+          isSuccess = true;
+          verifyError = null;
+          break; // Thành công thì thoát
+        } else {
+          verifyError = error;
+        }
+      }
+
+      if (!isSuccess && verifyError) {
+        console.error('[verify-otp] Supabase Verify Error:', verifyError);
+        return NextResponse.json({ error: `Supabase Auth: ${verifyError.message}` }, { status: 400 });
       }
     }
 
