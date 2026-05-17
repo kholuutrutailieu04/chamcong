@@ -15,7 +15,7 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Hệ thống Chấm công Thông minh V2 | BV Chấm Công",
+  title: "Hệ thống Chấm công Thông minh | BV Chấm Công",
   description: "Giải pháp điểm danh bằng khuôn mặt, định vị GPS và quản lý luân chuyển nhân sự hiện đại trên nền tảng Cloud.",
   keywords: ["chấm công", "điểm danh khuôn mặt", "quản lý nhân sự", "hospital management", "timekeeping"],
   authors: [{ name: "Antigravity AI" }],
