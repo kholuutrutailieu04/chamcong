@@ -259,8 +259,8 @@ function AttendanceClient() {
   }
 
   return (
-    <main className="min-h-screen bg-bg-main p-4 flex flex-col items-center justify-center">
-      <div className="glass p-6 rounded-2xl max-w-sm w-full space-y-5 shadow-2xl animate-fade-in">
+    <main className="min-h-screen bg-bg-main p-4 pt-6 flex flex-col items-center">
+      <div className="glass p-6 rounded-2xl max-w-md w-full space-y-5 shadow-2xl animate-fade-in">
 
         {/* Tiêu đề */}
         <div className="text-center space-y-1">
@@ -275,7 +275,7 @@ function AttendanceClient() {
 
         {/* Camera Feed */}
         {(appStatus === 'cam_loading' || appStatus === 'ready' || appStatus === 'face_ok' || appStatus === 'processing') && (
-          <div className={`relative rounded-xl overflow-hidden aspect-video border-4 transition-colors ${appStatus === 'face_ok' ? 'border-success' : 'border-glass-border'
+          <div className={`relative rounded-xl overflow-hidden aspect-[4/3] border-4 transition-colors ${appStatus === 'face_ok' ? 'border-success' : 'border-glass-border'
             }`}>
             <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
             <canvas ref={canvasRef} className="hidden" />
