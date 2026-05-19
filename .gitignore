@@ -35,7 +35,7 @@ chamcong-bvpsn-*.json
 
 # local/internal docs and database notes
 /local-docs/
-/docs/
+/database/
 
 # Supabase schema is managed outside this GitHub repo
 /supabase/
