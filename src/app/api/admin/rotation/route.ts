@@ -5,10 +5,14 @@ import { is3CaShiftType, normalizeShiftType } from '@/lib/shift';
 export async function GET(req: NextRequest) {
   // Lấy các lệnh luân chuyển PENDING hoặc APPROVED của tháng
   const status = req.nextUrl.searchParams.get('status');
+  const type = req.nextUrl.searchParams.get('type');
+  const limit = Number(req.nextUrl.searchParams.get('limit') ?? '0');
   const admin = getAdminClient();
 
   let query = admin.from('yeu_cau_quan_tri').select('*').order('created_at', { ascending: false });
   if (status) query = query.eq('trang_thai', status);
+  if (type) query = query.eq('loai_yeu_cau', type);
+  if (Number.isInteger(limit) && limit > 0) query = query.limit(Math.min(limit, 100));
 
   const { data, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

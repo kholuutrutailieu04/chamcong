@@ -16,6 +16,7 @@
 scratch_*.js
 test_output.xlsx
 .lint-*.json
+.next-dev-*.log
 
 # next.js
 /.next/

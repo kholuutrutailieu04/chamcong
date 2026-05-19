@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 import type { ReactNode } from 'react';
 import { 
@@ -77,11 +76,14 @@ export default function AdminDashboardAuth() {
   const [isClient, setIsClient] = useState(false);
 
   useEffect(() => {
-    setIsClient(true);
-    const sessionEmail = sessionStorage.getItem(ADMIN_SESSION_KEY);
-    if (sessionEmail) {
-      setAuthed(sessionEmail);
-    }
+    const timer = window.setTimeout(() => {
+      setIsClient(true);
+      const sessionEmail = sessionStorage.getItem(ADMIN_SESSION_KEY);
+      if (sessionEmail) {
+        setAuthed(sessionEmail);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
   const [checking, setChecking] = useState(false);
   const [authError, setAuthError] = useState('');
@@ -1029,8 +1031,10 @@ function RotationTab({ initialTargetEmp }: RotationTabProps) {
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setCoSos(data as CoSoOption[]); })
       .catch(() => {});
-    supabase.from('yeu_cau_quan_tri').select('*').eq('loai_yeu_cau', 'LUAN_CHUYEN').order('created_at', { ascending: false }).limit(20)
-      .then(({ data }) => setHistory((data || []) as RotationHistory[]));
+    fetch('/api/admin/rotation?type=LUAN_CHUYEN&limit=20')
+      .then(r => r.json())
+      .then(data => { if (Array.isArray(data)) setHistory(data as RotationHistory[]); })
+      .catch(() => {});
   }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -1360,4 +1364,3 @@ function RandomCheckTab({ queue = [] }: RandomCheckTabProps) {
     </div>
   );
 }
-

@@ -201,27 +201,45 @@ export interface Database {
       dm_khoa_phong_emails: {
         Row: {
           email: string
-          ma_khoa: string
+          ma_khoa: string | null
           ho_ten: string
           trang_thai: boolean | null
           created_at: string | null
           mat_khau: string | null
+          role: string
+          password_changed_at: string | null
+          last_login_at: string | null
+          failed_login_count: number
+          locked_until: string | null
+          session_version: number
         }
         Insert: {
           email: string
-          ma_khoa: string
+          ma_khoa?: string | null
           ho_ten: string
           trang_thai?: boolean | null
           created_at?: string | null
           mat_khau?: string | null
+          role?: string
+          password_changed_at?: string | null
+          last_login_at?: string | null
+          failed_login_count?: number
+          locked_until?: string | null
+          session_version?: number
         }
         Update: {
           email?: string
-          ma_khoa?: string
+          ma_khoa?: string | null
           ho_ten?: string
           trang_thai?: boolean | null
           created_at?: string | null
           mat_khau?: string | null
+          role?: string
+          password_changed_at?: string | null
+          last_login_at?: string | null
+          failed_login_count?: number
+          locked_until?: string | null
+          session_version?: number
         }
         Relationships: [
           {
@@ -685,7 +703,6 @@ export interface Database {
           gioi_tinh: string | null
           so_dien_thoai: string | null
           email: string | null
-          face_descriptor: string | null
           trang_thai: boolean | null
           cho_phep_di_chuyen_tu_do: boolean | null
         }
@@ -702,7 +719,6 @@ export interface Database {
           gioi_tinh?: string | null
           so_dien_thoai?: string | null
           email?: string | null
-          face_descriptor?: string | null
           trang_thai?: boolean | null
           cho_phep_di_chuyen_tu_do?: boolean | null
         }
@@ -719,7 +735,6 @@ export interface Database {
           gioi_tinh?: string | null
           so_dien_thoai?: string | null
           email?: string | null
-          face_descriptor?: string | null
           trang_thai?: boolean | null
           cho_phep_di_chuyen_tu_do?: boolean | null
         }

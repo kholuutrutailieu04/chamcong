@@ -130,6 +130,12 @@ export async function GET(req: NextRequest) {
   const admin = getAdminClient();
   const past48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
 
+  const { data: employee } = await admin
+    .from('nhan_vien')
+    .select('ho_ten, khoa_phong')
+    .eq('ma_nv', emp_id)
+    .single();
+
   const { data: recentRecords } = await admin
     .from('lich_su_cham_cong')
     .select('id, loai_ca, thoi_gian, in_record_id')
@@ -179,6 +185,7 @@ export async function GET(req: NextRequest) {
     .limit(3);
 
   return NextResponse.json({
+    employee: employee ?? null,
     show_buttons: showButtons,
     records_recent: recentRecords ?? [],
     self_correction: selfCorrection,

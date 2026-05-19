@@ -2,7 +2,6 @@
 
 import { Suspense, useEffect, useRef, useState, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
 import {
   MapPin,
@@ -25,6 +24,7 @@ type AppStatus =
   | 'error';       // Lỗi
 
 type ButtonType = 'IN_LAM' | 'IN_TRUC' | 'OUT';
+type ErrorAction = 'retry' | 'reload';
 type AttendanceEmployee = Pick<Database['public']['Tables']['nhan_vien']['Row'], 'ho_ten' | 'khoa_phong'>;
 type SelfCorrectionState = {
   can_correct: boolean;
@@ -43,6 +43,41 @@ const LABEL_MAP: Record<ButtonType, { text: string; color: string }> = {
   'IN_LAM': { text: 'VÀO LÀM', color: 'bg-primary hover:bg-primary/90' },
   'IN_TRUC': { text: 'VÀO TRỰC', color: 'bg-accent hover:bg-accent/90' },
   'OUT': { text: 'RA VỀ', color: 'bg-slate-700 hover:bg-slate-600' },
+};
+
+const isIOSAndSafari = () => {
+  if (typeof window === 'undefined') return false;
+  const ua = navigator.userAgent;
+  const isIOS = /iPad|iPhone|iPod/.test(ua) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isSafari = /Safari/i.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
+  return isIOS && isSafari;
+};
+
+const getGeoErrorCode = (err: unknown) => (
+  typeof err === 'object' && err !== null && 'code' in err
+    ? Number((err as GeolocationPositionError).code)
+    : 0
+);
+
+const getGpsErrorState = (err: unknown): { message: string; action: ErrorAction } => {
+  const errorCode = getGeoErrorCode(err);
+  if (isIOSAndSafari() && errorCode === 1) {
+    return {
+      action: 'reload',
+      message: 'Bạn đã chặn quyền vị trí. Vui lòng vào Cài đặt -> Safari -> Vị trí -> Chọn Hỏi hoặc Cho phép để tiếp tục.',
+    };
+  }
+  if (errorCode === 2 || errorCode === 3) {
+    return {
+      action: 'retry',
+      message: 'Không thể lấy vị trí lúc này. Vui lòng kiểm tra GPS/mạng rồi thử lại.',
+    };
+  }
+  return {
+    action: 'retry',
+    message: 'Không thể lấy vị trí. Vui lòng bật GPS rồi thử lại.',
+  };
 };
 
 export default function AttendancePage() {
@@ -82,6 +117,8 @@ function AttendanceClient() {
 
   const [appStatus, setAppStatus] = useState<AppStatus>('loading');
   const [message, setMessage] = useState('Đang khởi tạo...');
+  const [requiresGpsTrigger, setRequiresGpsTrigger] = useState(false);
+  const [errorAction, setErrorAction] = useState<ErrorAction>('retry');
   const [employee, setEmployee] = useState<AttendanceEmployee | null>(null);
   const [showButtons, setShowButtons] = useState<ButtonType[]>([]);
   const [selfCorrection, setSelfCorrection] = useState<SelfCorrectionState | null>(null);
@@ -92,6 +129,7 @@ function AttendanceClient() {
   // BƯỚC 1 & 2: GPS Check → Nếu trong khuôn viên → Bật camera
   // ------------------------------------------------------------------
   const initSystem = useCallback(async () => {
+    setErrorAction('retry');
     if (!empId) {
       setAppStatus('error');
       setMessage('Mã QR không hợp lệ. Vui lòng quét lại.');
@@ -108,9 +146,11 @@ function AttendanceClient() {
         navigator.geolocation.getCurrentPosition(res, rej, { enableHighAccuracy: true, timeout: 10000 })
       );
       gpsStr = `${pos.coords.latitude},${pos.coords.longitude}`;
-    } catch {
+    } catch (err: unknown) {
+      const gpsError = getGpsErrorState(err);
       setAppStatus('gps_fail');
-      setMessage('Không thể lấy vị trí. Vui lòng bật GPS và tải lại trang.');
+      setErrorAction(gpsError.action);
+      setMessage(gpsError.message);
       return;
     }
 
@@ -127,25 +167,28 @@ function AttendanceClient() {
     setAppStatus('cam_loading');
     setMessage('Đang tải dữ liệu nhân viên...');
 
-    const [empRes, statusRes] = await Promise.all([
-      supabase.from('nhan_vien').select('ho_ten, khoa_phong').eq('ma_nv', empId).single(),
-      fetch(`/api/attendance?emp_id=${empId}`)
-    ]);
-
-    if (empRes.data) setEmployee(empRes.data);
+    const statusRes = await fetch(`/api/attendance?emp_id=${empId}`);
     const statusData = await statusRes.json();
+    setEmployee((statusData.employee as AttendanceEmployee | null) ?? null);
     setShowButtons(statusData.show_buttons ?? ['IN_LAM', 'IN_TRUC']);
     setSelfCorrection((statusData.self_correction as SelfCorrectionState | null) ?? null);
     setRejectedRecords((statusData.rejected_special as RejectedSpecialRecord[] | undefined) ?? []);
 
     // 3. Tải AI model + camera (song song)
     setMessage('Đang tải mô hình AI và khởi động camera...');
-    const faceapi = await import('@vladmandic/face-api');
-    faceApiRef.current = faceapi;
-    const [stream] = await Promise.all([
-      navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } }),
-      faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
-    ]);
+    let stream: MediaStream;
+    try {
+      const faceapi = await import('@vladmandic/face-api');
+      faceApiRef.current = faceapi;
+      [stream] = await Promise.all([
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } }),
+        faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
+      ]);
+    } catch {
+      setAppStatus('error');
+      setMessage('Không thể mở camera. Vui lòng cho phép quyền Camera rồi thử lại.');
+      return;
+    }
 
     if (videoRef.current) {
       videoRef.current.srcObject = stream;
@@ -160,8 +203,14 @@ function AttendanceClient() {
   // BƯỚC 3: Vòng lặp Nhận diện khuôn mặt (chạy liên tục khi ready)
   // ------------------------------------------------------------------
   useEffect(() => {
+    if (!empId) return;
+    if (isIOSAndSafari()) {
+      setRequiresGpsTrigger(true);
+      setMessage('Nhấn nút bên dưới để bật vị trí.');
+      return;
+    }
     initSystem();
-  }, [initSystem]);
+  }, [empId, initSystem]);
 
   useEffect(() => {
     if (appStatus !== 'ready' && appStatus !== 'face_ok') return;
@@ -233,6 +282,14 @@ function AttendanceClient() {
         setSuccessMsg(`${typeText} thành công lúc ${new Date().toLocaleTimeString('vi-VN')}`);
       }
     } catch (err: unknown) {
+      const geoErrorCode = getGeoErrorCode(err);
+      if (geoErrorCode > 0) {
+        const gpsError = getGpsErrorState(err);
+        setAppStatus('gps_fail');
+        setErrorAction(gpsError.action);
+        setMessage(gpsError.message);
+        return;
+      }
       const errorMessage = err instanceof Error ? err.message : 'Có lỗi xảy ra. Vui lòng thử lại.';
       setAppStatus('error');
       setMessage(errorMessage);
@@ -242,6 +299,13 @@ function AttendanceClient() {
   const handleSelfCorrection = async (targetType: 'IN_LAM' | 'IN_TRUC') => {
     if (!selfCorrection?.record_id) return;
     await handleAttendance(targetType, selfCorrection.record_id);
+  };
+
+  const handleGpsTrigger = async () => {
+    setRequiresGpsTrigger(false);
+    setAppStatus('loading');
+    setMessage('Đang xác định vị trí...');
+    await initSystem();
   };
 
   // ------------------------------------------------------------------
@@ -292,6 +356,16 @@ function AttendanceClient() {
         {/* Message */}
         {appStatus !== 'success' && (
           <p className="text-center text-sm text-text-muted leading-relaxed min-h-[20px]">{message}</p>
+        )}
+
+        {/* Kích hoạt GPS thủ công cho iOS Safari */}
+        {requiresGpsTrigger && (
+          <button
+            onClick={handleGpsTrigger}
+            className="w-full bg-primary hover:bg-primary/90 text-white font-bold py-4 rounded-xl transition-all active:scale-95 shadow-lg"
+          >
+            Nhấn để bật vị trí
+          </button>
         )}
 
         {/* Nút bấm (chỉ hiện khi face_ok) */}
@@ -359,10 +433,18 @@ function AttendanceClient() {
             <AlertTriangle className="text-error mx-auto" size={32} />
             <p className="text-sm text-error font-medium">{message}</p>
             <button
-              onClick={() => { setAppStatus('loading'); setMessage('Đang thử lại...'); initSystem(); }}
+              onClick={() => {
+                if (errorAction === 'reload') {
+                  window.location.reload();
+                  return;
+                }
+                setAppStatus('loading');
+                setMessage('Đang thử lại...');
+                initSystem();
+              }}
               className="text-xs text-primary underline"
             >
-              Thử lại
+              {errorAction === 'reload' ? 'Tải lại trang' : 'Thử lại'}
             </button>
           </div>
         )}
