@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { getTodayVN, getVNDayRangeUTC } from '@/lib/timezone';
+import { requireManager } from '@/lib/auth';
 
 type ActualAttendanceStatus = {
   id: string;
@@ -23,28 +24,22 @@ function escapeLike(value: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
-  const isTestManager = req.nextUrl.searchParams.get('is_test') === 'true';
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
+  // Lấy khoa và is_test từ session token
+  const khoa = session.ma_khoa as string;
+  const isTestManager = (session.is_test_account as boolean | undefined) ?? false;
 
   if (!khoa) return NextResponse.json({ error: 'Thiếu mã khoa' }, { status: 400 });
 
   const admin = getAdminClient();
 
-  // 1. Resolve department name
-  const { data: dmKhoa } = await admin
-    .from('dm_khoa_phong')
-    .select('ten_khoa')
-    .eq('ma_khoa', khoa)
-    .single();
-
-  const tenKhoa = (dmKhoa?.ten_khoa || khoa).trim();
-  const likePattern = `${escapeLike(tenKhoa)}%`;
-
   // 2. Fetch employees
   let empQuery = admin
     .from('nhan_vien')
     .select('ma_nv, ho_ten, loai_truc_mac_dinh, ma_co_so_mac_dinh, trang_thai, so_dien_thoai, khoa_phong')
-    .or(`khoa_phong.eq.${khoa},khoa_phong.eq.${tenKhoa},khoa_phong.ilike.${likePattern}`)
+    .eq('khoa_phong', khoa)
     .not('trang_thai', 'is', false)
     .order('ho_ten');
 

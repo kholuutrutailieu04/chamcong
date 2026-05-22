@@ -8,8 +8,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { autoCloseLatestOpenInForEmployee } from '@/lib/auto-close-open-in';
 import { getTodayVN, getVNDayRangeUTC } from '@/lib/timezone';
+import { requireManager } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
@@ -17,13 +21,14 @@ export async function POST(req: NextRequest) {
       ma_nv: string;
       ho_ten: string;
       loai_ca: 'IN_LAM' | 'IN_TRUC';
-      khoa: string;
-      nguoi_ghi: string;
       ly_do: string;
       is_test?: boolean;
     };
 
-    const { ma_nv, ho_ten, loai_ca, khoa, nguoi_ghi, ly_do, is_test } = body;
+    const { ma_nv, ho_ten, loai_ca, ly_do, is_test } = body;
+    // Lấy khoa và email từ session token
+    const khoa = session.ma_khoa as string;
+    const nguoi_ghi = session.email as string;
 
     if (!ma_nv || !loai_ca || !khoa || !nguoi_ghi || !ly_do) {
       return NextResponse.json({ error: 'Thiếu dữ liệu bắt buộc.' }, { status: 400 });

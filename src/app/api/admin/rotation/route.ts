@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { is3CaShiftType, normalizeShiftType } from '@/lib/shift';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   // Lấy các lệnh luân chuyển PENDING hoặc APPROVED của tháng
   const status = req.nextUrl.searchParams.get('status');
   const type = req.nextUrl.searchParams.get('type');
@@ -21,6 +25,9 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   
   try {

@@ -1,9 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { requireManager } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   try {
-    const { action, recordId, reason, managerEmail } = await req.json();
+    const { action, recordId, reason } = await req.json();
+    // Lấy email và khoa từ session token
+    const managerEmail = session.email as string;
+    const managerKhoa = session.ma_khoa as string;
 
     if (!recordId || !action || !managerEmail) {
       return NextResponse.json({ error: 'Thiếu thông tin bắt buộc' }, { status: 400 });
@@ -15,19 +22,7 @@ export async function POST(req: NextRequest) {
 
     const admin = getAdminClient();
 
-    // Verify Manager Authorization
-    const { data: managerData } = await admin
-      .from('dm_khoa_phong_emails')
-      .select('ma_khoa')
-      .eq('email', managerEmail)
-      .eq('trang_thai', true)
-      .single();
-
-    if (!managerData?.ma_khoa) {
-      return NextResponse.json({ error: 'Không có quyền truy cập' }, { status: 403 });
-    }
-
-    // Get Current Record
+    // Verify record belongs to manager's khoa (from session, not from client)
     const { data: record, error: recordErr } = await admin
       .from('lich_su_cham_cong')
       .select('ghi_chu, khoa_ghi_nhan')
@@ -38,7 +33,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Không tìm thấy bản ghi chấm công' }, { status: 404 });
     }
 
-    if (record.khoa_ghi_nhan !== managerData.ma_khoa) {
+    if (record.khoa_ghi_nhan !== managerKhoa) {
       return NextResponse.json({ error: 'Không thể duyệt bản ghi của Khoa khác' }, { status: 403 });
     }
 

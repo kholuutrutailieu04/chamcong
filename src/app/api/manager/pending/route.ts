@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { requireManager } from '@/lib/auth';
 
 // Lấy danh sách nhân viên chưa Checkout trong 48h tại khoa
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
+  // Lấy khoa từ session token
+  const khoa = session.ma_khoa as string;
   if (!khoa) {
     return NextResponse.json({ error: 'Thiếu mã khoa' }, { status: 400 });
   }
@@ -40,10 +45,15 @@ export async function GET(req: NextRequest) {
 
 // Trưởng khoa Check-out hộ
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   
   try {
-    const { in_id, ma_nv, ho_ten, khoa_ghi_nhan } = await req.json();
+    const { in_id, ma_nv, ho_ten } = await req.json();
+    // Lấy khoa từ session token
+    const khoa_ghi_nhan = session.ma_khoa as string;
 
     if (!in_id || !ma_nv) {
        return NextResponse.json({ error: 'Thiếu thông tin' }, { status: 400 });

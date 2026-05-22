@@ -7,21 +7,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { calculateAndRecordRest } from '@/lib/rest-logic';
+import { requireManager } from '@/lib/auth';
 
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
     const body = (await req.json()) as {
       in_record_id: string;
       ma_nv: string;
-      khoa: string;
       reason: string;
-      nguoi_sua: string;
       is_test?: boolean;
     };
 
-    const { in_record_id, ma_nv, khoa, reason, nguoi_sua, is_test } = body;
+    const { in_record_id, ma_nv, reason, is_test } = body;
+    // Lấy khoa và email từ session token
+    const khoa = session.ma_khoa as string;
+    const nguoi_sua = session.email as string;
 
     if (!in_record_id || !ma_nv || !khoa || !reason || !nguoi_sua) {
       return NextResponse.json({ error: 'Thiếu dữ liệu bắt buộc.' }, { status: 400 });

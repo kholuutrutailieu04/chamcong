@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { requireManager } from '@/lib/auth';
 
 function escapeLike(value: string): string {
   return value.replace(/[%_]/g, (m) => `\\${m}`);
@@ -9,26 +10,21 @@ function escapeLike(value: string): string {
  * GET /api/manager/employees?khoa=KSS&is_test=false
  */
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
-  const isTestManager = req.nextUrl.searchParams.get('is_test') === 'true';
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
 
-  if (!khoa) return NextResponse.json({ error: 'Thiếu mã khoa' }, { status: 400 });
+  // Lấy khoa từ session (token), không tin vào query string
+  const khoa = session.ma_khoa as string;
+  const isTestManager = (session.is_test_account as boolean | undefined) ?? false;
+
+  if (!khoa) return NextResponse.json({ error: 'Thiếu mã khoa trong session.' }, { status: 400 });
 
   const admin = getAdminClient();
-
-  const { data: dmKhoa } = await admin
-    .from('dm_khoa_phong')
-    .select('ten_khoa')
-    .eq('ma_khoa', khoa)
-    .single();
-
-  const tenKhoa = (dmKhoa?.ten_khoa || khoa).trim();
-  const likePattern = `${escapeLike(tenKhoa)}%`;
 
   let query = admin
     .from('nhan_vien')
     .select('ma_nv, ho_ten, loai_truc_mac_dinh, ma_co_so_mac_dinh, trang_thai, so_dien_thoai, khoa_phong')
-    .or(`khoa_phong.eq.${khoa},khoa_phong.eq.${tenKhoa},khoa_phong.ilike.${likePattern}`)
+    .eq('khoa_phong', khoa)
     .not('trang_thai', 'is', false)
     .order('ho_ten');
 
@@ -50,6 +46,9 @@ export async function GET(req: NextRequest) {
  * Trưởng khoa chỉ được sửa ho_ten và so_dien_thoai của nhân viên trong khoa.
  */
 export async function PATCH(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
@@ -57,32 +56,23 @@ export async function PATCH(req: NextRequest) {
       ma_nv: string;
       ho_ten: string;
       so_dien_thoai: string;
-      khoa: string;       // Mã khoa của manager đang đăng nhập
-      nguoi_sua: string;  // Email manager
     };
 
-    const { ma_nv, ho_ten, so_dien_thoai, khoa, nguoi_sua } = body;
+    const { ma_nv, ho_ten, so_dien_thoai } = body;
+    // Lấy khoa từ session token, không nhận từ body
+    const khoa = session.ma_khoa as string;
+    const nguoi_sua = session.email as string;
 
     if (!ma_nv || !ho_ten?.trim() || !khoa || !nguoi_sua) {
       return NextResponse.json({ error: 'Thiếu dữ liệu bắt buộc.' }, { status: 400 });
     }
-
-    // Lấy tên khoa để đối chiếu chéo
-    const { data: dmKhoa } = await admin
-      .from('dm_khoa_phong')
-      .select('ten_khoa')
-      .eq('ma_khoa', khoa)
-      .single();
-
-    const tenKhoa = (dmKhoa?.ten_khoa || khoa).trim();
-    const likePattern = `${escapeLike(tenKhoa)}%`;
 
     // Xác nhận nhân viên thuộc khoa
     const { data: emp } = await admin
       .from('nhan_vien')
       .select('ma_nv, ho_ten, khoa_phong')
       .eq('ma_nv', ma_nv)
-      .or(`khoa_phong.eq.${khoa},khoa_phong.eq.${tenKhoa},khoa_phong.ilike.${likePattern}`)
+      .eq('khoa_phong', khoa)
       .single();
 
     if (!emp) {

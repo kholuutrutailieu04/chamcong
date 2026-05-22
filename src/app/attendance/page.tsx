@@ -25,7 +25,9 @@ type AppStatus =
 
 type ButtonType = 'IN_LAM' | 'IN_TRUC' | 'OUT';
 type ErrorAction = 'retry' | 'reload';
-type AttendanceEmployee = Pick<Database['public']['Tables']['nhan_vien']['Row'], 'ho_ten' | 'khoa_phong'>;
+type AttendanceEmployee = Pick<Database['public']['Tables']['nhan_vien']['Row'], 'ho_ten' | 'khoa_phong'> & {
+  dm_khoa_phong?: { ten_khoa: string } | null;
+};
 type SelfCorrectionState = {
   can_correct: boolean;
   record_id: string;
@@ -256,18 +258,27 @@ function AttendanceClient() {
 
       const deviceId = localStorage.getItem('employee_device_id');
 
-      const res = await fetch('/api/attendance', {
+      const targetUrl = correctionId ? '/api/attendance/correct' : '/api/attendance';
+      const requestBody = correctionId
+        ? {
+            emp_id: empId,
+            target_type: type,
+            reason: 'Nhân viên tự sửa nhầm ca trực'
+          }
+        : {
+            emp_id: empId,
+            type,
+            image: imageData,
+            gps,
+            is_suspicious: false,
+            device_id: deviceId,
+            gps_accuracy: pos.coords.accuracy
+          };
+
+      const res = await fetch(targetUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          emp_id: empId,
-          type,
-          image: imageData,
-          gps,
-          is_suspicious: false,
-          device_id: deviceId,
-          correction_for_id: correctionId
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       const result = await res.json();
@@ -330,7 +341,7 @@ function AttendanceClient() {
         <div className="text-center space-y-1">
           <h1 className="text-2xl font-bold font-outfit">Điểm Danh</h1>
           <p className="text-text-muted text-sm font-medium">
-            {employee?.ho_ten || empId} • {employee?.khoa_phong}
+            {employee?.ho_ten || empId} • {employee?.dm_khoa_phong?.ten_khoa || employee?.khoa_phong}
           </p>
         </div>
 

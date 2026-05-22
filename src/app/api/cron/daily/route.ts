@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
-import { cleanupSandboxData } from '@/lib/cleanup';
+import { cleanupSandboxData, archivePreviousMonthAttendance } from '@/lib/cleanup';
 import { getTodayVN } from '@/lib/timezone';
 import { applyDueAutoCloseConfig } from '@/lib/auto-close-open-in';
 
@@ -120,11 +120,15 @@ export async function GET(req: Request) {
     // 3. Dọn dẹp dữ liệu Sandbox (Test Data)
     const cleanupResult = await cleanupSandboxData(admin);
 
+    // 4. Tự động lưu trữ dữ liệu tháng cũ khi qua ngày 10+
+    const archiveResult = await archivePreviousMonthAttendance(admin);
+
     return NextResponse.json({ 
       success: true, 
       inserted_count: logsToInsert.length,
       auto_close_open_in: autoCloseConfig,
-      cleanup: cleanupResult
+      cleanup: cleanupResult,
+      archive: archiveResult
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Lỗi chạy cron';

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import bcrypt from 'bcryptjs';
+import { signToken } from '@/lib/auth';
+import { cookies } from 'next/headers';
 
 const DEFAULT_PASSWORD = 'benhvienphusannhidanang1005';
 
@@ -61,6 +63,24 @@ export async function POST(req: NextRequest) {
         if (khoaData.cho_phep_3ca4kip) allowed_shifts.push('3CA_4KIP');
       }
     }
+
+    // 4. Set cookie manager_session
+    const token = await signToken({
+      email,
+      ma_khoa: emailData.ma_khoa,
+      ho_ten: emailData.ho_ten,
+      is_test_account,
+      allowed_shifts,
+      cho_phep_chia_ca_truc,
+    }, '12h');
+    const cookieStore = await cookies();
+    cookieStore.set('manager_session', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 12 * 60 * 60, // 12 giờ
+    });
 
     return NextResponse.json({
       success: true,

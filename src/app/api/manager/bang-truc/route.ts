@@ -1,13 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { normalizeShiftType } from '@/lib/shift';
+import { requireManager } from '@/lib/auth';
 
 function escapeLike(value: string): string {
   return value.replace(/[%_]/g, (m) => `\\${m}`);
 }
 
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
+  // Lấy khoa từ session token
+  const khoa = session.ma_khoa as string;
   const thang = req.nextUrl.searchParams.get('thang');
 
   if (!khoa || !thang) {
@@ -15,19 +20,10 @@ export async function GET(req: NextRequest) {
   }
 
   const admin = getAdminClient();
-  const { data: dmKhoa } = await admin
-    .from('dm_khoa_phong')
-    .select('ten_khoa')
-    .eq('ma_khoa', khoa)
-    .single();
-
-  const tenKhoa = (dmKhoa?.ten_khoa || khoa).trim();
-  const likePattern = `${escapeLike(tenKhoa)}%`;
-
   const { data: employees, error: empErr } = await admin
     .from('nhan_vien')
     .select('ma_nv, ho_ten, loai_truc_mac_dinh, ma_co_so_mac_dinh, so_dien_thoai')
-    .or(`khoa_phong.eq.${khoa},khoa_phong.eq.${tenKhoa},khoa_phong.ilike.${likePattern}`)
+    .eq('khoa_phong', khoa)
     .not('trang_thai', 'is', false)
     .order('ho_ten');
 
@@ -58,10 +54,16 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
-    const { khoa, thang, ma_nv, ho_ten, loai_ca, ghi_chu, nguoi_phan_cong } = await req.json();
+    const { thang, ma_nv, ho_ten, loai_ca, ghi_chu } = await req.json();
+    // Lấy khoa và email từ session token
+    const khoa = session.ma_khoa as string;
+    const nguoi_phan_cong = session.email as string;
     if (!khoa || !thang || !ma_nv || !loai_ca) {
       return NextResponse.json({ error: 'Thiếu thông tin bắt buộc.' }, { status: 400 });
     }
@@ -113,10 +115,15 @@ export async function POST(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
-    const { khoa, thang, ma_nv } = await req.json();
+    const { thang, ma_nv } = await req.json();
+    // Lấy khoa từ session token
+    const khoa = session.ma_khoa as string;
     if (!khoa || !thang || !ma_nv) {
       return NextResponse.json({ error: 'Thiếu thông tin.' }, { status: 400 });
     }

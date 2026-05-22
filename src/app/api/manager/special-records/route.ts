@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { getCurrentVNMonth, getVNMonthRangeUTC, toVNDateString } from '@/lib/timezone';
+import { requireManager } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
+  // Lấy khoa từ session token
+  const khoa = session.ma_khoa as string;
   let thang = req.nextUrl.searchParams.get('thang');
 
   if (!khoa) {

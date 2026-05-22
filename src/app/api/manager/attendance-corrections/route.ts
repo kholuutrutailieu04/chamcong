@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { buildCorrectionNote, isInAttendanceType } from '@/lib/attendance-correction';
+import { requireManager } from '@/lib/auth';
 
 type ManagerCorrectionBody = {
   record_id: string;
   target_type: 'IN_LAM' | 'IN_TRUC';
   reason: string;
-  nguoi_sua: string;
-  khoa: string;
 };
 
 /**
@@ -45,8 +44,12 @@ function getVNDateBoundaries() {
 }
 
 export async function GET(req: NextRequest) {
-  const khoa = req.nextUrl.searchParams.get('khoa');
-  const isTestManager = req.nextUrl.searchParams.get('is_test') === 'true';
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
+  // Lấy khoa và is_test từ session token
+  const khoa = session.ma_khoa as string;
+  const isTestManager = (session.is_test_account as boolean | undefined) ?? false;
 
   if (!khoa) {
     return NextResponse.json({ error: 'Thiếu mã khoa.' }, { status: 400 });
@@ -145,13 +148,17 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireManager();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
     const body = (await req.json()) as ManagerCorrectionBody;
     const recordId = body.record_id?.trim();
-    const khoa = body.khoa?.trim();
-    const nguoiSua = body.nguoi_sua?.trim();
+    // Lấy khoa và nguoi_sua từ session token
+    const khoa = session.ma_khoa as string;
+    const nguoiSua = session.email as string;
     const reason = body.reason?.trim();
 
     if (!recordId || !khoa || !nguoiSua || !reason || !isInAttendanceType(body.target_type)) {

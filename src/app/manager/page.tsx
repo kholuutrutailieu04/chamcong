@@ -1,9 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { supabase } from '@/lib/supabase';
 import type { Database } from '@/lib/database.types';
-import { v4 as uuidv4 } from 'uuid';
 import {
   AlertTriangle,
   CheckSquare,
@@ -27,7 +25,6 @@ type ManagerSession = {
   email: string;
   khoa: string;
   ho_ten: string;
-  sid: string;
   cho_phep_chia_ca_truc?: boolean;
   is_test_account?: boolean;
   allowed_shifts?: string[];
@@ -91,7 +88,6 @@ const CA_OPTIONS = [
   { value: 'TRUC_24_24', label: 'Trực 24/24' },
 ];
 
-const MANAGER_SESSION_KEY = 'mgr_session';
 
 export default function ManagerDashboardAuth() {
   const [email, setEmail] = useState('');
@@ -99,20 +95,33 @@ export default function ManagerDashboardAuth() {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [session, setSession] = useState<ManagerSession | null>(() => {
-    if (typeof window === 'undefined') return null;
-    const cached = sessionStorage.getItem(MANAGER_SESSION_KEY);
-    if (!cached) return null;
-    try {
-      return JSON.parse(cached) as ManagerSession;
-    } catch {
-      return null;
-    }
-  });
+  const [session, setSession] = useState<ManagerSession | null>(null);
+  const [sessionLoading, setSessionLoading] = useState(true);
 
-  const handleLogout = useCallback(() => {
+  // Restore session từ cookie bằng cách gọi API /me
+  useEffect(() => {
+    fetch('/api/manager/me')
+      .then(r => r.json())
+      .then(data => {
+        if (data.session) {
+          const s = data.session;
+          setSession({
+            email: s.email as string,
+            khoa: s.ma_khoa as string,
+            ho_ten: s.ho_ten as string,
+            cho_phep_chia_ca_truc: s.cho_phep_chia_ca_truc as boolean | undefined,
+            is_test_account: s.is_test_account as boolean | undefined,
+            allowed_shifts: s.allowed_shifts as string[] | undefined,
+          });
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSessionLoading(false));
+  }, []);
+
+  const handleLogout = useCallback(async () => {
+    await fetch('/api/manager/logout', { method: 'POST' });
     setSession(null);
-    sessionStorage.removeItem(MANAGER_SESSION_KEY);
   }, []);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -133,6 +142,7 @@ export default function ManagerDashboardAuth() {
         return;
       }
 
+      // Cookie đã được server set, lấy session từ response
       const { ma_khoa, ho_ten, cho_phep_chia_ca_truc, is_test_account, allowed_shifts } = result.data;
       const newSession: ManagerSession = {
         email,
@@ -141,22 +151,22 @@ export default function ManagerDashboardAuth() {
         cho_phep_chia_ca_truc,
         is_test_account,
         allowed_shifts,
-        sid: uuidv4(),
       };
-      sessionStorage.setItem(MANAGER_SESSION_KEY, JSON.stringify(newSession));
       setSession(newSession);
-
-      await supabase.channel('manager-auth').send({
-        type: 'broadcast',
-        event: 'LOGIN',
-        payload: { email, newSid: newSession.sid },
-      });
     } catch {
       setLoginError('Lỗi kết nối, vui lòng thử lại.');
     }
 
     setLoading(false);
   };
+
+  if (sessionLoading) {
+    return (
+      <div className="min-h-screen bg-bg-main flex items-center justify-center">
+        <div className="text-text-muted text-sm">Đang kiểm tra phiên làm việc...</div>
+      </div>
+    );
+  }
 
   if (!session) {
     return (
@@ -230,47 +240,64 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
   const [loading, setLoading] = useState(true);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const { toastError, toastSuccess, toastWarning } = useToast();
+  const [confirmedMonth, setConfirmedMonth] = useState<string>('');
 
   const isTest = session.is_test_account ?? false;
+
+  const { currentMonthStr, prevMonthStr, showLockWarning } = useMemo(() => {
+    // Lấy thời gian hiện tại theo GMT+7
+    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
+    const currYear = tzDate.getUTCFullYear();
+    const currMonth = tzDate.getUTCMonth() + 1;
+    
+    const currentMonthStr = `${currYear}-${String(currMonth).padStart(2, '0')}`;
+    
+    // Tính tháng trước
+    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
+    const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    
+    // Nếu tháng đã xác nhận khác tháng trước (và khác tháng này) thì báo động
+    const showLockWarning = confirmedMonth !== prevMonthStr && confirmedMonth !== currentMonthStr;
+    
+    return { currentMonthStr, prevMonthStr, showLockWarning };
+  }, [confirmedMonth]);
 
   const fetchAll = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
       const isTestParam = isTest ? '&is_test=true' : '&is_test=false';
-      const [resRotation, resEmployees, resCorrection, resStaffStatus, resSpecial] = await Promise.all([
+      const [resRotation, resEmployees, resCorrection, resStaffStatus, resSpecial, resConfig] = await Promise.all([
         fetch(`/api/manager/rotation/approve?khoa=${session.khoa}`),
         fetch(`/api/manager/employees?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/attendance-corrections?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/staff-status?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/special-records?khoa=${session.khoa}${isTestParam}`),
+        fetch(`/api/manager/config`),
       ]);
       if (resRotation.ok) setRotations((await resRotation.json()) as RotationRequest[]);
       if (resEmployees.ok) setEmployees((await resEmployees.json()) as ManagerEmployee[]);
       if (resCorrection.ok) setCorrectionRecords((await resCorrection.json()) as ManagerCorrectionRecord[]);
       if (resStaffStatus.ok) setStaffStatusList((await resStaffStatus.json()) as StaffStatusRecord[]);
       if (resSpecial.ok) setSpecialRecords((await resSpecial.json()) as ManagerSpecialRecord[]);
+      if (resConfig.ok) {
+        const configData = await resConfig.json();
+        setConfirmedMonth(configData.value || '');
+      }
     } finally {
       if (showLoading) setLoading(false);
     }
   }, [isTest, session.khoa]);
 
+
   useEffect(() => {
     void fetchAll(false);
-
-    const authChannel = supabase.channel('manager-auth').on('broadcast', { event: 'LOGIN' }, (payload) => {
-      if (payload.payload.email === session.email && payload.payload.newSid !== session.sid) {
-        toastWarning('Phiên đăng nhập đã bị thay thế bởi thiết bị khác.');
-        onLogout();
-      }
-    }).subscribe();
 
     const timer = setInterval(() => { void fetchAll(false); }, 20000);
 
     return () => {
       clearInterval(timer);
-      supabase.removeChannel(authChannel);
     };
-  }, [fetchAll, onLogout, session.email, session.sid, toastWarning]);
+  }, [fetchAll, onLogout, session.email]);
 
   const approveRotation = async (requestId: string) => {
     if (!window.confirm('Bạn có chắc chắn muốn duyệt yêu cầu này?')) return;
@@ -316,10 +343,14 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
                 const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
                 window.open(`/api/export-excel?khoa=${session.khoa}&month=${month}`, '_blank');
               }}
-              className="p-2 bg-white border border-glass-border rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
-              title="Xuất Excel tháng này"
+              className={`p-2 bg-white border rounded-lg shadow-sm hover:bg-slate-50 transition-colors ${
+                showLockWarning 
+                  ? 'animate-warning-pulse border-amber-500 bg-amber-50' 
+                  : 'border-glass-border'
+              }`}
+              title={showLockWarning ? "Cảnh báo: Tháng cũ chưa được xác nhận!" : "Xuất Excel tháng này"}
             >
-              <FileSpreadsheet size={20} className="text-emerald-600" />
+              <FileSpreadsheet size={20} className={showLockWarning ? 'text-amber-600' : 'text-emerald-600'} />
             </button>
           )}
           <button
@@ -383,6 +414,28 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
 
       {showChangePassword && (
         <ChangePasswordModal email={session.email} onClose={() => setShowChangePassword(false)} />
+      )}
+
+      {showLockWarning && (
+        <div className="fixed bottom-6 left-6 right-6 z-50 bg-amber-500/90 backdrop-blur-md text-white px-6 py-4 rounded-2xl shadow-2xl border border-amber-400/50 flex flex-col md:flex-row items-center justify-between gap-4 animate-slide-up">
+          <div className="flex items-center gap-3">
+            <div className="bg-white/20 p-2.5 rounded-xl animate-pulse shrink-0">
+              <AlertTriangle size={24} className="text-white" />
+            </div>
+            <div>
+              <h4 className="font-bold text-base font-outfit">Cảnh Báo: Đối Soát Công Tháng {prevMonthStr}</h4>
+              <p className="text-sm text-white/90 mt-0.5 leading-relaxed">
+                Hệ thống đã bước sang tháng mới ({currentMonthStr}). Vui lòng <b>KHÔNG CHỈNH SỬA</b> lịch sử ca trực và chấm công của tháng cũ {prevMonthStr} cho đến khi nhận được xác nhận từ Phòng TCCB!
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={() => window.open(`/api/export-excel?khoa=${session.khoa}&month=${prevMonthStr}`, '_blank')}
+            className="px-5 py-2.5 bg-white hover:bg-slate-50 text-amber-700 rounded-xl text-sm font-bold shadow-md transition-all whitespace-nowrap"
+          >
+            Xuất Excel Tháng {prevMonthStr}
+          </button>
+        </div>
       )}
     </div>
   );

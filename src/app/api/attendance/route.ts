@@ -134,7 +134,7 @@ export async function GET(req: NextRequest) {
 
   const { data: employee } = await admin
     .from('nhan_vien')
-    .select('ho_ten, khoa_phong')
+    .select('ho_ten, khoa_phong, dm_khoa_phong(ten_khoa)')
     .eq('ma_nv', emp_id)
     .single();
 
@@ -200,13 +200,14 @@ export async function POST(req: NextRequest) {
 
   try {
     const body = await req.json();
-    const { emp_id, type, image, gps, is_suspicious: clientSuspicious, device_id } = body as {
+    const { emp_id, type, image, gps, is_suspicious: clientSuspicious, device_id, gps_accuracy } = body as {
       emp_id: string;
       type: AttendanceType;
       image: string;
       gps: string;
       is_suspicious: boolean;
       device_id?: string;
+      gps_accuracy?: number;
     };
 
     if (!emp_id || !type || !image || !gps) {
@@ -221,15 +222,53 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Tọa độ GPS sai định dạng' }, { status: 400 });
     }
 
-    // --- KIỂM TRA GIAN LẬN THIẾT BỊ ---
+    const { data: employee } = await admin
+      .from('nhan_vien')
+      .select('ho_ten, khoa_phong, trang_thai, loai_truc_mac_dinh, ma_co_so_mac_dinh, cho_phep_di_chuyen_tu_do')
+      .eq('ma_nv', emp_id)
+      .single();
+
+    if (!employee || !employee.trang_thai) {
+      return NextResponse.json({ error: 'Tài khoản không hợp lệ' }, { status: 403 });
+    }
+
+    // --- CHỐNG SPAM CHẤM CÔNG (DUPLICATE CHECK TRONG 10 GIÂY) ---
+    const tenSecondsAgo = new Date(Date.now() - 10000).toISOString();
+    const { data: duplicateCheck } = await admin
+      .from('lich_su_cham_cong')
+      .select('id')
+      .eq('ma_nv', emp_id)
+      .eq('loai_ca', type)
+      .gte('thoi_gian', tenSecondsAgo)
+      .limit(1);
+
+    if (duplicateCheck && duplicateCheck.length > 0) {
+      return NextResponse.json({ error: 'Thao tác quá nhanh. Vui lòng đợi 10 giây giữa các lần nhấn.' }, { status: 409 });
+    }
+
+    // --- KIỂM TRA GIAN LẬN THIẾT BỊ & GPS SPOOFING ---
     let finalSuspicious = clientSuspicious;
     let loaiGianLan: string | null = null;
     let ghiChuGianLan: string | null = null;
+    let maNvKeGian: string | null = null;
+    let khoaKeGian: string | null = null;
 
+    // 1. Kiểm tra GPS Accuracy
+    if (gps_accuracy === 0) {
+      finalSuspicious = true;
+      loaiGianLan = 'GPS_SPOOFING';
+      ghiChuGianLan = 'Độ chính xác định vị GPS bằng 0 (Nghi ngờ giả lập/Fake GPS)';
+    }
+
+    // 2. Kiểm tra Thiết bị
     if (!device_id) {
       finalSuspicious = true;
-      loaiGianLan = 'THIET_BI_LA';
-      ghiChuGianLan = 'Không gửi device_id từ trình duyệt (Xóa cache hoặc dùng trình duyệt ẩn danh)';
+      if (!loaiGianLan) {
+        loaiGianLan = 'THIET_BI_LA';
+        ghiChuGianLan = 'Không gửi device_id từ trình duyệt (Xóa cache hoặc dùng trình duyệt ẩn danh)';
+      } else {
+        ghiChuGianLan += ' | Không gửi device_id từ trình duyệt';
+      }
     } else {
       const { data: devRecords } = await admin
         .from('thiet_bi_nhan_vien')
@@ -242,23 +281,48 @@ export async function POST(req: NextRequest) {
       if (!isOwnActive) {
         finalSuspicious = true;
         if (isOtherOwner) {
-          loaiGianLan = 'SHARED_DEVICE_FRAUD';
-          ghiChuGianLan = `Dùng chung thiết bị với nhân viên ${isOtherOwner.ma_nv}`;
+          if (!loaiGianLan) {
+            loaiGianLan = 'SHARED_DEVICE_FRAUD';
+            ghiChuGianLan = `Dùng chung thiết bị với nhân viên ${isOtherOwner.ma_nv}`;
+          } else {
+            ghiChuGianLan += ` | Dùng chung thiết bị với nhân viên ${isOtherOwner.ma_nv}`;
+          }
+          maNvKeGian = isOtherOwner.ma_nv;
         } else {
-          loaiGianLan = 'THIET_BI_LA';
-          ghiChuGianLan = 'Thiết bị chưa được đăng ký OTP hoặc đã bị vô hiệu hóa do vượt quota';
+          if (!loaiGianLan) {
+            loaiGianLan = 'THIET_BI_LA';
+            ghiChuGianLan = 'Thiết bị chưa được đăng ký OTP hoặc đã bị vô hiệu hóa do vượt quota';
+          } else {
+            ghiChuGianLan += ' | Thiết bị chưa đăng ký hoặc bị vô hiệu hóa';
+          }
         }
       }
     }
 
-    const { data: employee } = await admin
-      .from('nhan_vien')
-      .select('ho_ten, khoa_phong, trang_thai, loai_truc_mac_dinh, ma_co_so_mac_dinh, cho_phep_di_chuyen_tu_do')
-      .eq('ma_nv', emp_id)
-      .single();
+    // Tự động phân giải khoa của kẻ gian nếu phát hiện dùng chung thiết bị
+    if (maNvKeGian) {
+      const { data: keGianEmp } = await admin
+        .from('nhan_vien')
+        .select('khoa_phong')
+        .eq('ma_nv', maNvKeGian)
+        .single();
 
-    if (!employee || !employee.trang_thai) {
-      return NextResponse.json({ error: 'Tài khoản không hợp lệ' }, { status: 403 });
+      if (keGianEmp) {
+        khoaKeGian = keGianEmp.khoa_phong;
+        const today = getTodayVN();
+        const { data: keGianRotations } = await admin
+          .from('lich_luan_chuyen')
+          .select('khoa_den')
+          .eq('ma_nv', maNvKeGian)
+          .lte('tu_ngay', today)
+          .or(`den_ngay.is.null,den_ngay.gte.${today}`)
+          .order('tu_ngay', { ascending: false })
+          .limit(1);
+
+        if (keGianRotations && keGianRotations.length > 0) {
+          khoaKeGian = keGianRotations[0].khoa_den;
+        }
+      }
     }
 
     const { data: campuses } = await admin
@@ -440,12 +504,20 @@ export async function POST(req: NextRequest) {
       .update({ link_anh_minh_chung: storageUpload.publicUrl })
       .eq('id', record.id);
 
-    const now = new Date();
-    const driveFolderHint = emp_id.startsWith('NV_TEST_')
-      ? `SANDBOX_TEST_FILES/${detectedCampus}/${khoaGhiNhan}`
-      : `Thang_${now.getMonth() + 1}_${now.getFullYear()}/${detectedCampus}/${khoaGhiNhan}`;
+    // Lấy ngày giờ theo múi giờ Việt Nam (GMT+7)
+    const vnDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
+    const yearStr = String(vnDate.getUTCFullYear());
+    const monthStr = String(vnDate.getUTCMonth() + 1).padStart(2, '0');
+    const dayStr = String(vnDate.getUTCDate()).padStart(2, '0');
+    const hourStr = String(vnDate.getUTCHours()).padStart(2, '0');
+    const minuteStr = String(vnDate.getUTCMinutes()).padStart(2, '0');
+    const secondStr = String(vnDate.getUTCSeconds()).padStart(2, '0');
 
-    const driveFileName = `CC_${emp_id}_${type}_${now.getTime()}.${storageUpload.mimeType.includes('png') ? 'png' : 'jpg'}`;
+    const driveFolderHint = emp_id.startsWith('NV_TEST_')
+      ? `SANDBOX_TEST_FILES/${detectedCampus}/${khoaGhiNhan}/Ngay_${dayStr}`
+      : `Thang_${Number(monthStr)}_${yearStr}/${detectedCampus}/${khoaGhiNhan}/Ngay_${dayStr}`;
+
+    const driveFileName = `${emp_id}_${yearStr}${monthStr}${dayStr}_${hourStr}${minuteStr}${secondStr}.${storageUpload.mimeType.includes('png') ? 'png' : 'jpg'}`;
 
     // Bước 2: Thử đẩy thẳng lên Drive ngay lập tức
     let directDriveSuccess = false;
@@ -543,6 +615,8 @@ export async function POST(req: NextRequest) {
         loai_gian_lan: loaiGianLan ?? 'KHONG_XAC_DINH',
         id_thiet_bi: device_id ?? 'KHONG_CO',
         ghi_chu: ghiChuGianLan,
+        ma_nv_ke_gian: maNvKeGian,
+        khoa_ke_gian: khoaKeGian,
       });
     }
 

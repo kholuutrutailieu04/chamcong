@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { Database } from '@/lib/database.types';
@@ -17,7 +17,8 @@ import {
   ArrowRightLeft,
   Eye,
   EyeOff,
-  X
+  X,
+  AlertTriangle
 } from 'lucide-react';
 
 type Employee = Database['public']['Tables']['nhan_vien']['Row'];
@@ -67,60 +68,46 @@ interface RotationPreview {
 }
 
 // -------------------------------------------------------------------
-// ADMIN AUTH GUARD (bảo vệ bằng Email trước khi vào)
+// ADMIN AUTH GUARD (bảo vệ bằng Cookie JWT)
 // -------------------------------------------------------------------
-const ADMIN_SESSION_KEY = 'admin_session_email';
 
 export default function AdminDashboardAuth() {
   const [adminEmail, setAdminEmail] = useState('');
   const [password, setPassword] = useState('');
   const [authed, setAuthed] = useState<string | null>(null);
-  const [isClient, setIsClient] = useState(false);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setIsClient(true);
-      const sessionEmail = sessionStorage.getItem(ADMIN_SESSION_KEY);
-      if (sessionEmail) {
-        setAuthed(sessionEmail);
-      }
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, []);
+  const [sessionLoading, setSessionLoading] = useState(true);
   const [checking, setChecking] = useState(false);
   const [authError, setAuthError] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  // Restore session từ cookie khi load trang
+  useEffect(() => {
+    fetch('/api/admin/me')
+      .then(r => r.json())
+      .then(data => {
+        if (data.session?.email) {
+          setAuthed(data.session.email as string);
+        }
+      })
+      .catch(() => {})
+      .finally(() => setSessionLoading(false));
+  }, []);
 
   const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setChecking(true);
     setAuthError('');
     try {
-      const emailLower = adminEmail.trim().toLowerCase();
-      
-      // Bỏ qua kiểm tra đối với tài khoản test
-      if (emailLower.startsWith('test_')) {
-        sessionStorage.setItem(ADMIN_SESSION_KEY, emailLower);
-        setAuthed(emailLower);
-        setChecking(false);
-        return;
-      }
-
-      // Với tài khoản chính, kiểm tra mật khẩu mặc định
-      if (password !== 'benhvienphusannhidanang1005') {
-        setAuthError('Mật khẩu không đúng.');
-        setChecking(false);
-        return;
-      }
-
-      const res = await fetch('/api/admin/data?type=admin_emails');
-      const { emails } = await res.json() as { emails: string[] };
-      if (emails.length === 0 || emails.includes(emailLower)) {
-        // emails rỗng = chưa cấu hình = cho phép tất cả (môi trường dev)
-        sessionStorage.setItem(ADMIN_SESSION_KEY, emailLower);
-        setAuthed(emailLower);
+      const res = await fetch('/api/admin/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: adminEmail.trim(), password }),
+      });
+      const result = await res.json();
+      if (!res.ok || !result.success) {
+        setAuthError(result.error || 'Không thể đăng nhập.');
       } else {
-        setAuthError('Email không có quyền truy cập trang quản trị này.');
+        setAuthed(adminEmail.trim().toLowerCase());
       }
     } catch {
       setAuthError('Lỗi kết nối. Vui lòng thử lại.');
@@ -128,7 +115,7 @@ export default function AdminDashboardAuth() {
     setChecking(false);
   };
 
-  if (!isClient) return null;
+  if (sessionLoading) return null;
 
   if (!authed) {
     return (
@@ -150,24 +137,22 @@ export default function AdminDashboardAuth() {
               className="w-full p-3 border border-slate-300 rounded-xl outline-none focus:border-primary text-sm"
             />
           </div>
-          {!adminEmail.toLowerCase().startsWith('test_') && (
-            <div className="relative">
-              <input
-                required type={showPassword ? 'text' : 'password'}
-                placeholder="Nhập mật khẩu quản trị"
-                value={password}
-                onChange={e => setPassword(e.target.value)}
-                className="w-full p-3 pr-10 border border-slate-300 rounded-xl outline-none focus:border-primary text-sm"
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
-              >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-              </button>
-            </div>
-          )}
+          <div className="relative">
+            <input
+              required type={showPassword ? 'text' : 'password'}
+              placeholder="Nhập mật khẩu quản trị"
+              value={password}
+              onChange={e => setPassword(e.target.value)}
+              className="w-full p-3 pr-10 border border-slate-300 rounded-xl outline-none focus:border-primary text-sm"
+            />
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none"
+            >
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
           {authError && <p className="text-xs text-red-600 bg-red-50 p-2 rounded-lg">{authError}</p>}
           <button disabled={checking} type="submit" className="w-full btn-primary py-3 font-bold">
             {checking ? 'Đang kiểm tra...' : 'Vào Cổng Quản Trị'}
@@ -177,7 +162,10 @@ export default function AdminDashboardAuth() {
     );
   }
 
-  return <AdminDashboard adminEmail={authed} onLogout={() => { sessionStorage.removeItem(ADMIN_SESSION_KEY); setAuthed(null); }} />;
+  return <AdminDashboard adminEmail={authed} onLogout={async () => {
+    await fetch('/api/admin/logout', { method: 'POST' });
+    setAuthed(null);
+  }} />;
 }
 
 function AdminDashboard({ adminEmail, onLogout }: { adminEmail: string; onLogout: () => void }) {
@@ -868,6 +856,67 @@ function ExportTab() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
+  const [confirmedMonth, setConfirmedMonth] = useState('');
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [updating, setUpdating] = useState(false);
+
+  const fetchConfig = async () => {
+    try {
+      const res = await fetch('/api/admin/data?type=configs');
+      if (res.ok) {
+        const data = await res.json();
+        const found = data.find((c: any) => c.key === 'THANG_DA_XAC_NHAN');
+        setConfirmedMonth(found?.value || '');
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingConfig(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchConfig();
+  }, []);
+
+  const handleConfirmMonth = async (targetMonth: string) => {
+    if (!window.confirm(`Xác nhận khóa dữ liệu tháng trước (${targetMonth})?\n\nSau khi khóa, tất cả các trang quản lý của Trưởng Khoa sẽ hiển thị cảnh báo màu đỏ yêu cầu KHÔNG ĐƯỢC CHỈNH SỬA cho đến khi có thông báo mới.`)) {
+      return;
+    }
+    setUpdating(true);
+    try {
+      const res = await fetch('/api/admin/data?type=configs', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'THANG_DA_XAC_NHAN', value: targetMonth }),
+      });
+      if (res.ok) {
+        setConfirmedMonth(targetMonth);
+        alert(`Đã khóa thành công dữ liệu tháng ${targetMonth}!`);
+      } else {
+        alert('Có lỗi xảy ra khi cập nhật cấu hình.');
+      }
+    } catch (e) {
+      alert('Lỗi kết nối mạng.');
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const { currentMonthStr, prevMonthStr, isConfirmed } = useMemo(() => {
+    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
+    const currYear = tzDate.getUTCFullYear();
+    const currMonth = tzDate.getUTCMonth() + 1;
+    
+    const currentMonthStr = `${currYear}-${String(currMonth).padStart(2, '0')}`;
+    
+    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
+    const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    
+    const isConfirmed = confirmedMonth === prevMonthStr || confirmedMonth === currentMonthStr;
+    
+    return { currentMonthStr, prevMonthStr, isConfirmed };
+  }, [confirmedMonth]);
 
   const downloadAll = () => {
     if (!month) return alert('Chọn tháng xuất báo cáo!');
@@ -880,6 +929,44 @@ function ExportTab() {
         <h2 className="text-2xl font-bold font-outfit text-slate-800">Trung Tâm Xuất Báo Cáo Excel</h2>
         <p className="text-sm text-slate-500 mt-1">Hệ thống tổng hợp chuẩn định dạng BCC, tự nhận diện vắt ca và tự bù ký hiệu phép.</p>
       </header>
+
+      {/* Monthly Lock status */}
+      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
+        <h3 className="text-sm font-bold text-slate-600 uppercase tracking-wider">Trạng thái khóa đối soát công tháng trước ({prevMonthStr})</h3>
+        
+        {loadingConfig ? (
+          <div className="text-xs text-slate-400">Đang tải trạng thái cấu hình...</div>
+        ) : isConfirmed ? (
+          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-start gap-3">
+            <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={20} />
+            <div>
+              <h4 className="font-bold text-emerald-800 text-sm">Đã khóa dữ liệu đối soát</h4>
+              <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
+                Tháng đã xác nhận: <b>{confirmedMonth}</b>. 
+                Giao diện quản lý của các Trưởng Khoa hiện đang ở trạng thái bình thường hoặc hiển thị thông báo an toàn.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={20} />
+            <div>
+              <h4 className="font-bold text-amber-800 text-sm">Chưa khóa dữ liệu tháng trước</h4>
+              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                Admin chưa xác nhận hoàn thành đối soát tháng <b>{prevMonthStr}</b>. 
+                Các Trưởng Khoa hiện tại vẫn nhìn thấy cảnh báo yêu cầu <b>KHÔNG ĐƯỢC CHỈNH SỬA</b> để đảm bảo tính nhất quán dữ liệu trước khi chốt công.
+              </p>
+              <button
+                disabled={updating}
+                onClick={() => handleConfirmMonth(prevMonthStr)}
+                className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-xs font-bold transition-all shadow-sm"
+              >
+                {updating ? 'Đang thực hiện...' : `Xác nhận & Khóa tháng ${prevMonthStr}`}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
         <div>

@@ -69,8 +69,7 @@ export async function GET(req: NextRequest) {
         .single();
 
       tenKhoaExport = (dmKhoa?.ten_khoa || khoa).trim();
-      const likePattern = `${escapeLike(tenKhoaExport)}%`;
-      empQuery = empQuery.or(`khoa_phong.eq.${khoa},khoa_phong.eq.${tenKhoaExport},khoa_phong.ilike.${likePattern}`);
+      empQuery = empQuery.eq('khoa_phong', khoa);
     }
 
     // Phân trang để vượt qua giới hạn 1000 dòng mặc định của Supabase

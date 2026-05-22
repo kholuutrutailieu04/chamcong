@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { deleteExpiredMasterOtp } from '@/lib/master-otp';
+import { requireAdmin } from '@/lib/auth';
 
 const PAGE_SIZE = 1000;
 
@@ -9,6 +10,9 @@ const PAGE_SIZE = 1000;
  * Dùng AdminClient (bypass RLS) để lấy dữ liệu danh mục cho trang Admin
  */
 export async function GET(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const type = req.nextUrl.searchParams.get('type');
   const admin = getAdminClient();
 
@@ -94,6 +98,9 @@ export async function GET(req: NextRequest) {
  * Cập nhật giá trị cấu hình hệ thống
  */
 export async function PATCH(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const type = req.nextUrl.searchParams.get('type');
   if (type !== 'configs' && type !== 'employees') {
     return NextResponse.json({ error: 'Chỉ hỗ trợ PATCH type=configs hoặc type=employees' }, { status: 400 });

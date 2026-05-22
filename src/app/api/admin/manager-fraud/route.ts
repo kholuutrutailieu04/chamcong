@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { requireAdmin } from '@/lib/auth';
 
 const PAGE_SIZE = 1000;
 
 export async function GET() {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   try {
     // Lấy các lượt check-in tay gần nhất để UI lọc theo manager/khoa đang chọn.

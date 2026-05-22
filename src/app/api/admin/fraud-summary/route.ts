@@ -7,8 +7,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { addDaysToVNDate, getTodayVN, getVNDateTimeUTC } from '@/lib/timezone';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   const period = req.nextUrl.searchParams.get('period') ?? 'month';
 

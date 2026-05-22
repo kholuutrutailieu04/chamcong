@@ -4,6 +4,7 @@ import type { Database } from '@/lib/database.types';
 import Papa from 'papaparse';
 import { normalizeShiftType } from '@/lib/shift';
 import { normalizeCampusCode } from '@/lib/campus';
+import { requireAdmin } from '@/lib/auth';
 
 type CsvRow = Record<string, string | null | undefined>;
 type NhanVienInsert = Database['public']['Tables']['nhan_vien']['Insert'];
@@ -27,6 +28,9 @@ const HEADER_ALIASES: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   try {
     const { csvText } = await req.json();
     if (!csvText) {

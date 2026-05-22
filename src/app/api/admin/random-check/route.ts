@@ -4,12 +4,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { Database } from '@/lib/database.types';
 import { normalizeShiftType } from '@/lib/shift';
 import { getTodayVN, getVNHour } from '@/lib/timezone';
+import { requireAdmin } from '@/lib/auth';
 
 /**
  * POST /api/admin/random-check/init
  * Khởi tạo phiên kiểm tra cho danh sách mã NV
  */
 export async function POST(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   try {
     const { employeeIds } = await req.json();
@@ -81,6 +85,9 @@ export async function POST(req: NextRequest) {
  * Xóa sạch bảng kiểm tra đột xuất
  */
 export async function DELETE() {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   try {
     const { error } = await admin.from('kiem_tra_dot_xuat').delete().neq('id', '00000000-0000-0000-0000-000000000000'); // Xóa tất cả
@@ -96,6 +103,9 @@ export async function DELETE() {
  * Lấy danh sách kết quả hiện tại cho Admin
  */
 export async function GET() {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   const { data, error } = await admin.from('kiem_tra_dot_xuat').select('*').order('created_at', { ascending: false });
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

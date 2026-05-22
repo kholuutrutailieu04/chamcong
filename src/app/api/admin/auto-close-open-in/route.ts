@@ -4,14 +4,21 @@ import {
   applyDueAutoCloseConfig,
   scheduleAutoCloseConfigChange,
 } from '@/lib/auto-close-open-in';
+import { requireAdmin } from '@/lib/auth';
 
 export async function GET() {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
   const config = await applyDueAutoCloseConfig(admin);
   return NextResponse.json(config);
 }
 
 export async function POST(req: NextRequest) {
+  const session = await requireAdmin();
+  if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
+
   const admin = getAdminClient();
 
   try {
