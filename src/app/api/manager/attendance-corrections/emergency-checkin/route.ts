@@ -6,6 +6,8 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { autoCloseLatestOpenInForEmployee } from '@/lib/auto-close-open-in';
+import { getTodayVN, getVNDayRangeUTC } from '@/lib/timezone';
 
 export async function POST(req: NextRequest) {
   const admin = getAdminClient();
@@ -51,11 +53,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Kiểm tra hôm nay đã có check-in chưa (tránh tạo trùng)
-    const todayStart = new Date();
-    todayStart.setUTCHours(todayStart.getUTCHours() - 7); // Convert to VN
-    todayStart.setHours(0, 0, 0, 0);
-    const todayStartUTC = new Date(todayStart.getTime() + 7 * 60 * 60 * 1000).toISOString();
-    const todayEndUTC = new Date(todayStart.getTime() + 7 * 60 * 60 * 1000 + 24 * 60 * 60 * 1000 - 1).toISOString();
+    const { startUTC: todayStartUTC, endUTC: todayEndUTC } = getVNDayRangeUTC(getTodayVN());
 
     const { data: existing } = await admin
       .from('lich_su_cham_cong')
@@ -74,13 +72,21 @@ export async function POST(req: NextRequest) {
     }
 
     const note = `[EMERGENCY-CHECKIN] Bởi ${nguoi_ghi}: ${ly_do}`;
+    const nowIso = new Date().toISOString();
+
+    await autoCloseLatestOpenInForEmployee(admin, {
+      maNv: ma_nv,
+      closeAtISO: nowIso,
+      note: `[HỆ THỐNG] Tự động OUT do trưởng khoa hỗ trợ check-in (${nguoi_ghi})`,
+      isTest: is_test ?? false,
+    });
 
     const { error: insertError } = await admin.from('lich_su_cham_cong').insert({
       ma_nv,
       ho_ten: ho_ten || emp.ho_ten,
       khoa_ghi_nhan: tenKhoa,
       loai_ca,
-      thoi_gian: new Date().toISOString(),
+      thoi_gian: nowIso,
       ghi_chu: note,
       is_test: is_test ?? false,
       ho_tro_boi: nguoi_ghi,

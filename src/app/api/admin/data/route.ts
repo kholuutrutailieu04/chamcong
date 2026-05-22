@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { deleteExpiredMasterOtp } from '@/lib/master-otp';
+
+const PAGE_SIZE = 1000;
 
 /**
  * GET /api/admin/data?type=khoas|co_so|configs
@@ -31,6 +34,7 @@ export async function GET(req: NextRequest) {
     }
 
     if (type === 'configs') {
+      await deleteExpiredMasterOtp(admin);
       const { data, error } = await admin
         .from('cau_hinh_he_thong')
         .select('*')
@@ -41,15 +45,28 @@ export async function GET(req: NextRequest) {
 
     if (type === 'employees') {
       const isTestMode = req.nextUrl.searchParams.get('is_test') === 'true';
-      let query = admin.from('nhan_vien').select('*').order('ho_ten');
-      if (isTestMode) {
-        query = query.like('ma_nv', 'NV_TEST_%');
-      } else {
-        query = query.not('ma_nv', 'like', 'NV_TEST_%');
+      const employees = [];
+
+      for (let from = 0; ; from += PAGE_SIZE) {
+        let query = admin
+          .from('nhan_vien')
+          .select('*')
+          .order('ho_ten')
+          .range(from, from + PAGE_SIZE - 1);
+
+        if (isTestMode) {
+          query = query.like('ma_nv', 'NV_TEST_%');
+        } else {
+          query = query.not('ma_nv', 'like', 'NV_TEST_%');
+        }
+
+        const { data, error } = await query;
+        if (error) throw error;
+        employees.push(...(data ?? []));
+        if (!data || data.length < PAGE_SIZE) break;
       }
-      const { data, error } = await query;
-      if (error) throw error;
-      return NextResponse.json(data ?? []);
+
+      return NextResponse.json(employees);
     }
 
     if (type === 'admin_emails') {

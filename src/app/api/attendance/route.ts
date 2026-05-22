@@ -11,6 +11,8 @@ import { uploadAttendanceImageToStorage } from '@/lib/storage';
 import { uploadToDriveWithFolderHierarchy } from '@/lib/drive';
 import { LEGACY_3CA_CHILD_CODES, is3CaShiftType, normalizeShiftType, SHIFT_TYPE_3CA_PARENT } from '@/lib/shift';
 import { calculateAndRecordRest } from '@/lib/rest-logic';
+import { autoCloseLatestOpenInForEmployee } from '@/lib/auto-close-open-in';
+import { getTodayVN } from '@/lib/timezone';
 
 import {
   findLatestOpenInRecord,
@@ -277,7 +279,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Bạn đang ở ngoài khuôn viên bệnh viện.' }, { status: 403 });
     }
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayVN();
     const { data: rotation } = await admin
       .from('lich_luan_chuyen')
       .select('khoa_den, loai_truc_moi, ma_co_so_dich')
@@ -319,39 +321,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (type === 'IN_LAM' || type === 'IN_TRUC') {
-      const past48h = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
-      const { data: oldIns } = await admin
-        .from('lich_su_cham_cong')
-        .select('id, loai_ca, ghi_chu')
-        .eq('ma_nv', emp_id)
-        .in('loai_ca', ['IN_LAM', 'IN_TRUC'])
-        .gte('thoi_gian', past48h)
-        .order('thoi_gian', { ascending: false })
-        .limit(1);
-
-      if (oldIns && oldIns.length > 0) {
-        const potentialInId = oldIns[0].id;
-        const { data: outLink } = await admin
-          .from('lich_su_cham_cong')
-          .select('id')
-          .eq('in_record_id', potentialInId)
-          .limit(1);
-
-        if (!outLink || outLink.length === 0) {
-          await admin.from('lich_su_cham_cong').insert({
-            ma_nv: emp_id,
-            ho_ten: employee.ho_ten,
-            khoa_ghi_nhan: khoaGhiNhan,
-            loai_ca: 'OUT',
-            ma_co_so: detectedCampus,
-            thoi_gian: nowTimeISO,
-            in_record_id: potentialInId,
-            is_suspicious: false,
-            is_test: emp_id.startsWith('NV_TEST_'),
-            ghi_chu: '[HỆ THỐNG] Tự động OUT do Check-in ca mới',
-          });
-        }
-      }
+      await autoCloseLatestOpenInForEmployee(admin, {
+        maNv: emp_id,
+        closeAtISO: nowTimeISO,
+        maCoSo: detectedCampus,
+        note: '[HỆ THỐNG] Tự động OUT do Check-in ca mới',
+        isTest: emp_id.startsWith('NV_TEST_'),
+      });
     } // end if IN_LAM || IN_TRUC
 
     let closestInRecord: { id: string; loai_ca: string; ghi_chu: string | null } | null = null;

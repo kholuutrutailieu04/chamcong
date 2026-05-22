@@ -181,7 +181,7 @@ function AttendanceClient() {
       const faceapi = await import('@vladmandic/face-api');
       faceApiRef.current = faceapi;
       [stream] = await Promise.all([
-        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } }),
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 960 } } }),
         faceapi.nets.tinyFaceDetector.loadFromUri('/models'),
       ]);
     } catch {
@@ -244,8 +244,8 @@ function AttendanceClient() {
       const video = videoRef.current!;
       const canvas = canvasRef.current!;
       const ctx = canvas.getContext('2d')!;
-      canvas.width = 300;
-      canvas.height = Math.round(300 * video.videoHeight / video.videoWidth);
+      canvas.width = 480;
+      canvas.height = Math.round(480 * video.videoHeight / video.videoWidth);
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
       const imageData = canvas.toDataURL('image/jpeg', 0.75);
 
@@ -324,7 +324,7 @@ function AttendanceClient() {
 
   return (
     <main className="min-h-screen bg-bg-main p-4 pt-6 flex flex-col items-center">
-      <div className="glass p-6 rounded-2xl max-w-md w-full space-y-5 shadow-2xl animate-fade-in">
+      <div className="glass p-6 rounded-2xl max-w-xl w-full space-y-5 shadow-2xl animate-fade-in">
 
         {/* Tiêu đề */}
         <div className="text-center space-y-1">
@@ -337,9 +337,9 @@ function AttendanceClient() {
         {/* Trạng thái GPS */}
         <StatusBadge status={appStatus} />
 
-        {/* Camera Feed */}
+        {/* Camera Feed — tách ra ngoài padding để chiếm full width của container */}
         {(appStatus === 'cam_loading' || appStatus === 'ready' || appStatus === 'face_ok' || appStatus === 'processing') && (
-          <div className={`relative rounded-xl overflow-hidden aspect-[4/3] border-4 transition-colors ${appStatus === 'face_ok' ? 'border-success' : 'border-glass-border'
+          <div className={`relative rounded-xl overflow-hidden aspect-[4/3] border-4 transition-colors mx-[-24px] ${appStatus === 'face_ok' ? 'border-success' : 'border-glass-border'
             }`}>
             <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
             <canvas ref={canvasRef} className="hidden" />

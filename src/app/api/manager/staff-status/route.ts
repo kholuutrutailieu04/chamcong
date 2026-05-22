@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { getTodayVN, getVNDayRangeUTC } from '@/lib/timezone';
 
 type ActualAttendanceStatus = {
   id: string;
@@ -61,15 +62,9 @@ export async function GET(req: NextRequest) {
   const empIds = employees.map(e => e.ma_nv);
   if (empIds.length === 0) return NextResponse.json([]);
 
-  // 3. Fetch ACTUAL check-ins for today
-  const todayStart = new Date();
-  todayStart.setUTCHours(todayStart.getUTCHours() - 7); // VN TZ
-  todayStart.setHours(0, 0, 0, 0);
-  const todayStartUTC = new Date(todayStart.getTime() + 7 * 60 * 60 * 1000).toISOString();
-  
-  const todayEnd = new Date(todayStart);
-  todayEnd.setHours(23, 59, 59, 999);
-  const todayEndUTC = new Date(todayEnd.getTime() + 7 * 60 * 60 * 1000).toISOString();
+  // 3. Fetch ACTUAL check-ins for today (theo VN timezone GMT+7)
+  const todayDateStr = getTodayVN(); // YYYY-MM-DD theo múi giờ VN
+  const { startUTC: todayStartUTC, endUTC: todayEndUTC } = getVNDayRangeUTC(todayDateStr);
 
   // We look for the FIRST IN_LAM or IN_TRUC of the day
   const { data: actuals } = await admin
@@ -92,7 +87,6 @@ export async function GET(req: NextRequest) {
   }
 
   // 4. Fetch PLAN (Leaves) for today
-  const todayDateStr = new Date(todayStart.getTime() + 7 * 60 * 60 * 1000).toISOString().split('T')[0];
 
   const { data: plans } = await admin
     .from('don_nghi_phep')

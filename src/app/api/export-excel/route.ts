@@ -3,6 +3,7 @@ import { getAdminClient } from '@/lib/supabase';
 import ExcelJS from 'exceljs';
 import { translateAttendanceSymbol, getDaysInMonth } from '@/lib/utils';
 import { normalizeCampusCode } from '@/lib/campus';
+import { getVNMonthRangeUTC, toVNDateString } from '@/lib/timezone';
 import path from 'path';
 import fs from 'fs';
 
@@ -19,6 +20,18 @@ function normalizeHeaderMonth(input: string, month: number, year: number): strin
 function toDateLabel(monthStr: string): string {
   const [year, month] = monthStr.split('-');
   return `Tháng ${Number(month)}.${year}`;
+}
+
+function getVNMinutesOfDay(isoString: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(isoString));
+  const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? '0');
+  const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? '0');
+  return hour * 60 + minute;
 }
 
 export async function GET(req: NextRequest) {
@@ -94,10 +107,11 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Không tìm thấy nhân sự nào.' }, { status: 404 });
     }
 
-    const startDate = new Date(Date.UTC(year, month - 1, 1));
-    const endDate = new Date(Date.UTC(year, month, 1));
+    const { startUTC, endUTC } = getVNMonthRangeUTC(monthStr);
+    const startDate = new Date(startUTC);
+    const endDate = new Date(endUTC);
 
-    const startDateStr = startDate.toISOString().split('T')[0];
+    const startDateStr = `${year}-${String(month).padStart(2, '0')}-01`;
     const endDateStr = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
 
     // Lấy ngày lễ trong tháng
@@ -107,7 +121,7 @@ export async function GET(req: NextRequest) {
       .gte('ngay', startDateStr)
       .lte('ngay', endDateStr);
       
-    const holidaySet = new Set(holidaysData?.map(h => new Date(h.ngay).getDate()) || []);
+    const holidaySet = new Set(holidaysData?.map(h => Number(h.ngay.split('-')[2])) || []);
 
     // Phân trang lấy toàn bộ lịch sử chấm công trong tháng
     type RawRecord = { id: string; ma_nv: string | null; loai_ca: string | null; thoi_gian: string | null; in_record_id: string | null; ghi_chu: string | null; };
@@ -118,7 +132,7 @@ export async function GET(req: NextRequest) {
         .from('lich_su_cham_cong')
         .select('ma_nv, loai_ca, thoi_gian, id, in_record_id, ghi_chu')
         .gte('thoi_gian', startDate.toISOString())
-        .lt('thoi_gian', endDate.toISOString())
+        .lte('thoi_gian', endDate.toISOString())
         .eq('is_test', false)
         .range(recFrom, recFrom + PAGE_SIZE - 1);
       if (recErr) throw recErr;
@@ -137,7 +151,7 @@ export async function GET(req: NextRequest) {
 
     allRecords.forEach((r) => {
       if (!r.ma_nv || !r.thoi_gian || !r.loai_ca) return;
-      const day = new Date(r.thoi_gian).getDate();
+      const day = Number(toVNDateString(new Date(r.thoi_gian)).split('-')[2]);
       if (!recordMap[r.ma_nv]) return;
       if (!recordMap[r.ma_nv][day]) recordMap[r.ma_nv][day] = [];
       recordMap[r.ma_nv][day].push({
@@ -296,9 +310,8 @@ export async function GET(req: NextRequest) {
               finalSymbol = '+';
               if (isHanhChinh && latestOut) {
                 // Tinh gio lam thuc te (co tru nghi trua neu thich hop)
-                const inMin = new Date(latestIn.thoi_gian).getHours() * 60 + new Date(latestIn.thoi_gian).getMinutes();
-                const rawOutDate = new Date(latestOut.thoi_gian);
-                const outRaw = rawOutDate.getHours() * 60 + rawOutDate.getMinutes();
+                const inMin = getVNMinutesOfDay(latestIn.thoi_gian);
+                const outRaw = getVNMinutesOfDay(latestOut.thoi_gian);
                 const outMin = Math.min(outRaw, 17 * 60); // Khong tinh qua 17:00
                 const overlap = Math.max(0, Math.min(outMin, TRUA_KET_THUC) - Math.max(inMin, TRUA_BAT_DAU));
                 const workedMin = Math.max(0, outMin - inMin - overlap);
@@ -309,6 +322,11 @@ export async function GET(req: NextRequest) {
             }
           }
         }
+        } else if (latestIn && !latestOut) {
+          const pendingHours = Math.floor((Date.now() - new Date(latestIn.thoi_gian).getTime()) / (1000 * 60 * 60));
+          finalSymbol = pendingHours >= 48
+            ? translateAttendanceSymbol('KHONG_LUONG')
+            : latestIn.loai_ca === 'IN_TRUC' ? 'in·' : 'in';
         } else if (hasNghiPhep || hasNghiBu) {
           // Khong co check-in nhung co don nghi / nghi bu
           const leaveType = types.find((t) =>
@@ -328,7 +346,7 @@ export async function GET(req: NextRequest) {
             finalSymbol = 'NL';
             if (isHanhChinh) tongCongDays += 1;
           } else {
-            const dateObj = new Date(year, month - 1, day);
+            const dateObj = new Date(Date.UTC(year, month - 1, day));
             const isWeekend = dateObj.getDay() === 0 || dateObj.getDay() === 6;
             finalSymbol = isWeekend ? '-' : '';
           }
@@ -337,7 +355,7 @@ export async function GET(req: NextRequest) {
         const colNumber = (khoa === 'ALL' ? 6 : 2) + day;
         const cell = sheet.getRow(currentRow).getCell(colNumber);
         cell.value = finalSymbol;
-        if (finalSymbol === 'in' || finalSymbol === 'in*') {
+        if (finalSymbol === 'in' || finalSymbol === 'in·') {
           cell.font = { italic: true, color: { argb: 'FF888888' }, size: 8 };
           cell.alignment = { horizontal: 'center', vertical: 'middle' };
         } else {

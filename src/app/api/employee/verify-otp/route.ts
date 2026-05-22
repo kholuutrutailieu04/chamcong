@@ -8,6 +8,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { createClient } from '@supabase/supabase-js';
+import { MASTER_OTP_KEY, deleteExpiredMasterOtp, getMasterOtpExpiresAt } from '@/lib/master-otp';
 
 export async function POST(req: NextRequest) {
   const admin = getAdminClient();
@@ -25,22 +26,21 @@ export async function POST(req: NextRequest) {
     }
 
     // Tầng 1: Kiểm tra Master OTP
+    await deleteExpiredMasterOtp(admin);
     const { data: masterOtpRecord } = await admin
       .from('cau_hinh_he_thong')
       .select('value, mo_ta')
-      .eq('key', 'MASTER_OTP')
-      .single();
+      .eq('key', MASTER_OTP_KEY)
+      .maybeSingle();
 
     let isMasterOtpValid = false;
     if (masterOtpRecord && masterOtpRecord.value === otp.trim()) {
-      const expireMatch = masterOtpRecord.mo_ta?.match(/Hết hạn: (.+)/);
-      if (expireMatch) {
-        const expireAt = new Date(expireMatch[1]);
-        if (new Date() <= expireAt) {
+      const expireAt = getMasterOtpExpiresAt(masterOtpRecord.mo_ta);
+      if (expireAt) {
+        if (Date.now() <= expireAt.getTime()) {
           isMasterOtpValid = true;
         } else {
-          // Xóa Master OTP hết hạn cho sạch DB (tùy chọn)
-          await admin.from('cau_hinh_he_thong').delete().eq('key', 'MASTER_OTP');
+          await admin.from('cau_hinh_he_thong').delete().eq('key', MASTER_OTP_KEY);
         }
       }
     }

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { QrCode, ShieldCheck, MapPin, Zap, Users, LayoutDashboard, Building2 } from 'lucide-react';
+import { QrCode, ShieldCheck, MapPin, Zap, Users } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export default function Home() {
@@ -24,24 +24,15 @@ export default function Home() {
             kết hợp định vị GPS và lưu trữ đám mây bảo mật.
           </p>
 
-          <div className="flex flex-wrap justify-center gap-4 mb-20">
-            <Link href="/attendance" className="group flex flex-col items-center gap-2 px-8 py-5 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/30 hover:scale-105 transition-all">
-              <QrCode size={28} />
+          {/* Chỉ hiển thị 2 nút dành cho nhân viên. /manager và /admin truy cập qua URL trực tiếp. */}
+          <div className="flex flex-wrap justify-center gap-6 mb-20">
+            <Link href="/attendance" className="group flex flex-col items-center gap-2 px-10 py-6 rounded-2xl bg-primary text-white font-bold shadow-lg shadow-primary/30 hover:scale-105 transition-all">
+              <QrCode size={32} />
               <span className="text-base">Chấm Công</span>
               <span className="text-[11px] font-normal opacity-80">Nhân viên quét mã</span>
             </Link>
-            <Link href="/manager" className="group flex flex-col items-center gap-2 px-8 py-5 rounded-2xl glass border border-glass-border hover:bg-white/60 font-bold transition-all hover:scale-105">
-              <LayoutDashboard size={28} className="text-accent" />
-              <span className="text-base">Quản Lý Khoa</span>
-              <span className="text-[11px] font-normal text-text-muted">Trưởng / Phó khoa</span>
-            </Link>
-            <Link href="/admin" className="group flex flex-col items-center gap-2 px-8 py-5 rounded-2xl glass border border-glass-border hover:bg-white/60 font-bold transition-all hover:scale-105">
-              <Building2 size={28} className="text-warning" />
-              <span className="text-base">Lãnh Đạo TCCB</span>
-              <span className="text-[11px] font-normal text-text-muted">Tổ chức Cán bộ</span>
-            </Link>
-            <Link href="/employee/login" className="group flex flex-col items-center gap-2 px-8 py-5 rounded-2xl glass border border-glass-border hover:bg-white/60 font-bold transition-all hover:scale-105">
-              <Users size={28} className="text-slate-500" />
+            <Link href="/employee/login" className="group flex flex-col items-center gap-2 px-10 py-6 rounded-2xl glass border border-glass-border hover:bg-white/60 font-bold transition-all hover:scale-105">
+              <Users size={32} className="text-slate-500" />
               <span className="text-base">Cổng Nhân Viên</span>
               <span className="text-[11px] font-normal text-text-muted">Tra cứu lịch sử</span>
             </Link>

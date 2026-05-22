@@ -10,6 +10,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { getVNMonthRangeUTC } from '@/lib/timezone';
 
 export async function GET(req: NextRequest) {
   const ma_nv = req.nextUrl.searchParams.get('ma_nv');
@@ -39,10 +40,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Mã nhân viên không hợp lệ hoặc đã ngừng hoạt động' }, { status: 404 });
   }
 
-  // Bước 2: Tính toán khoảng thời gian của tháng cần tra cứu
-  const [year, monthNum] = month.split('-').map(Number);
-  const firstDay = new Date(year, monthNum - 1, 1).toISOString();
-  const lastDay  = new Date(year, monthNum, 0, 23, 59, 59).toISOString();
+  // Bước 2: Tính toán khoảng thời gian của tháng cần tra cứu (theo múi giờ VN GMT+7)
+  const { startUTC: firstDay, endUTC: lastDay } = getVNMonthRangeUTC(month);
 
   // Bước 3: Lấy dữ liệu chấm công — server dùng chìa khóa Chủ, trình duyệt không biết
   const { data: records, error: recordsError } = await admin

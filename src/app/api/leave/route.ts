@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import type { Json } from '@/lib/database.types';
+import { getTodayVN } from '@/lib/timezone';
 
 type LeaveAuditEntry = {
   action: 'CREATE' | 'CANCEL';
@@ -16,7 +17,7 @@ export async function GET(req: NextRequest) {
   if (!khoa) return NextResponse.json({ error: 'Thiếu mã khoa' }, { status: 400 });
 
   const admin = getAdminClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayVN();
 
   // Lấy các đơn phép bao trùm ngày hôm nay
   const { data, error } = await admin
@@ -143,8 +144,7 @@ export async function DELETE(req: NextRequest) {
     const { data: plan } = await admin.from('don_nghi_phep').select('*').eq('id', id).single();
     if (!plan) return NextResponse.json({ error: 'Không tìm thấy lệnh nghỉ' }, { status: 404 });
 
-    // VN time today date string
-    const todayDateStr = new Date(Date.now() + 7*3600*1000).toISOString().split('T')[0];
+    const todayDateStr = getTodayVN();
 
     const auditEntry: LeaveAuditEntry = {
       action: 'CANCEL',

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { MASTER_OTP_KEY, buildMasterOtpDescription, deleteExpiredMasterOtp } from '@/lib/master-otp';
 
 function generateOtp(): string {
   return String(Math.floor(100000 + Math.random() * 900000));
@@ -9,14 +10,16 @@ export async function POST() {
   const admin = getAdminClient();
 
   try {
+    await deleteExpiredMasterOtp(admin);
+
     const masterOtp = generateOtp();
-    const expireAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 phút
+    const expireAt = new Date(Date.now() + 10 * 60 * 1000); // 10 phút
 
     await admin.from('cau_hinh_he_thong').upsert(
       {
-        key: 'MASTER_OTP',
+        key: MASTER_OTP_KEY,
         value: masterOtp,
-        mo_ta: `Mã OTP Khẩn Cấp dùng chung | Hết hạn: ${expireAt}`,
+        mo_ta: buildMasterOtpDescription(expireAt),
         kieu_du_lieu: 'OTP_MASTER',
         trang_thai: true,
       },

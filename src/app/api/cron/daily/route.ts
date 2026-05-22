@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { cleanupSandboxData } from '@/lib/cleanup';
+import { getTodayVN } from '@/lib/timezone';
+import { applyDueAutoCloseConfig } from '@/lib/auto-close-open-in';
 
 // Helper: Ensure the API requires a cron secret for security (optional but recommended)
 export async function GET(req: Request) {
@@ -10,9 +12,11 @@ export async function GET(req: Request) {
   }
 
   const admin = getAdminClient();
-  const today = new Date().toISOString().split('T')[0];
+  const today = getTodayVN(); // YYYY-MM-DD theo múi giờ VN (GMT+7)
 
   try {
+    const autoCloseConfig = await applyDueAutoCloseConfig(admin);
+
     // 0. Kiểm tra ngày lễ
     const { data: isHoliday } = await admin
       .from('ngay_le')
@@ -25,6 +29,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ 
         success: true, 
         message: `Hôm nay là ngày lễ (${isHoliday.ten_ngay_le}), không ghi phép tự động.`,
+        auto_close_open_in: autoCloseConfig,
         cleanup: cleanupResult
       });
     }
@@ -64,7 +69,10 @@ export async function GET(req: Request) {
     const allLeaves: LeaveRow[] = [...(activeLeaves ?? []), ...restLogs];
 
     if (allLeaves.length === 0) {
-      return NextResponse.json({ message: 'Khong co don phep/nghi bu nao trong hom nay.' });
+      return NextResponse.json({
+        message: 'Khong co don phep/nghi bu nao trong hom nay.',
+        auto_close_open_in: autoCloseConfig,
+      });
     }
 
     /**
@@ -115,6 +123,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ 
       success: true, 
       inserted_count: logsToInsert.length,
+      auto_close_open_in: autoCloseConfig,
       cleanup: cleanupResult
     });
   } catch (e: unknown) {

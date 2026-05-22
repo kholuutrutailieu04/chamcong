@@ -3,6 +3,7 @@ import { getAdminClient } from '@/lib/supabase';
 import { v4 as uuidv4 } from 'uuid';
 import { Database } from '@/lib/database.types';
 import { normalizeShiftType } from '@/lib/shift';
+import { getTodayVN, getVNHour } from '@/lib/timezone';
 
 /**
  * POST /api/admin/random-check/init
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
     }
 
     const results: Database['public']['Tables']['kiem_tra_dot_xuat']['Row'][] = [];
-    const today = new Date().toISOString().split('T')[0];
+    const today = getTodayVN();
 
     for (const ma_nv of employeeIds) {
       // 1. Tra cứu thông tin NV
@@ -46,7 +47,7 @@ export async function POST(req: NextRequest) {
 
       // 3. Xác định trạng thái dự kiến (đơn giản hóa)
       let trang_thai_du_kien = `Loại hình: ${loai_truc ?? 'CHUA_CAU_HINH'}`;
-      const hour = new Date().getHours();
+      const hour = getVNHour();
       if (loai_truc === 'HANH_CHINH') {
         if (hour >= 7 && hour < 17) trang_thai_du_kien += ' (Trong giờ HC)';
         else trang_thai_du_kien += ' (Ngoài giờ HC)';

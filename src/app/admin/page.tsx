@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { Database } from '@/lib/database.types';
 import type { ReactNode } from 'react';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { 
   Users, 
   Settings, 
@@ -21,7 +22,7 @@ import {
 
 type Employee = Database['public']['Tables']['nhan_vien']['Row'];
 type SystemConfig = Database['public']['Tables']['cau_hinh_he_thong']['Row'];
-type FraudSummaryItem = { ma_nv: string; ho_ten: string; khoa: string; so_lan: number; loi_vi_pham: string };
+type FraudSummaryItem = { ma_nv: string; ho_ten: string; khoa: string; loi_vi_pham: string };
 type FraudSubTab = 'SO_DEN' | 'MANAGER';
 type KhoaOption = Pick<Database['public']['Tables']['dm_khoa_phong']['Row'], 'ma_khoa' | 'ten_khoa'>;
 type CoSoOption = Pick<Database['public']['Tables']['co_so']['Row'], 'ma_co_so' | 'ten_co_so'>;
@@ -34,6 +35,7 @@ type ManagerManualRecent = Pick<
   khoa: string | null;
 };
 type ManagerManualSummary = {
+  key: string;
   manager: string;
   khoa: string;
   count: number;
@@ -225,7 +227,7 @@ function AdminDashboard({ adminEmail, onLogout }: { adminEmail: string; onLogout
         )}
         {activeTab === 'rotation'  && <RotationTab initialTargetEmp={targetRotationEmp} />}
         {activeTab === 'randomCheck' && <RandomCheckTab queue={snapCheckQueue} />}
-        {activeTab === 'config'    && <ConfigTab />}
+        {activeTab === 'config'    && <ConfigTab adminEmail={adminEmail} />}
         {activeTab === 'export'    && <ExportTab />}
         {activeTab === 'fraud'     && <FraudTab />}
       </main>
@@ -596,11 +598,56 @@ function EmployeeEditModal({
 // ----------------------------------------------------
 // TAB 2: CẤU HÌNH HỆ THỐNG
 // ----------------------------------------------------
-function ConfigTab() {
+type AutoCloseOpenInConfig = {
+  enabled: boolean;
+  pendingValue: boolean | null;
+  effectiveDate: string | null;
+  updatedBy: string | null;
+  updatedAt: string | null;
+};
+
+const AUTO_CLOSE_CONFIG_KEYS = new Set([
+  'AUTO_CLOSE_OPEN_IN_ENABLED',
+  'AUTO_CLOSE_OPEN_IN_PENDING_VALUE',
+  'AUTO_CLOSE_OPEN_IN_EFFECTIVE_DATE',
+  'AUTO_CLOSE_OPEN_IN_UPDATED_BY',
+  'AUTO_CLOSE_OPEN_IN_UPDATED_AT',
+]);
+
+const SYSTEM_READONLY_CONFIG_KEYS = new Set([
+  'MASTER_OTP',
+  'AUTO_CLOSE_OPEN_IN_PENDING_VALUE',
+  'AUTO_CLOSE_OPEN_IN_EFFECTIVE_DATE',
+  'AUTO_CLOSE_OPEN_IN_UPDATED_BY',
+  'AUTO_CLOSE_OPEN_IN_UPDATED_AT',
+]);
+
+function isBooleanConfig(config: SystemConfig): boolean {
+  return config.kieu_du_lieu === 'boolean' || config.value === 'true' || config.value === 'false';
+}
+
+function getClientVNDatePlus(days: number): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Ho_Chi_Minh',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date());
+  const year = Number(parts.find((part) => part.type === 'year')?.value ?? '0');
+  const month = Number(parts.find((part) => part.type === 'month')?.value ?? '1');
+  const day = Number(parts.find((part) => part.type === 'day')?.value ?? '1');
+  const date = new Date(Date.UTC(year, month - 1, day + days, 0, 0, 0, 0));
+  return date.toISOString().split('T')[0];
+}
+
+function ConfigTab({ adminEmail }: { adminEmail: string }) {
   const [configs, setConfigs] = useState<SystemConfig[]>([]);
   const [loading, setLoading] = useState(true);
   const [generatingOtp, setGeneratingOtp] = useState(false);
   const [masterOtp, setMasterOtp] = useState<string | null>(null);
+  const [autoCloseConfig, setAutoCloseConfig] = useState<AutoCloseOpenInConfig | null>(null);
+  const [autoCloseTarget, setAutoCloseTarget] = useState<boolean | null>(null);
+  const [savingAutoClose, setSavingAutoClose] = useState(false);
 
   const generateMasterOtp = async () => {
     if (!confirm('Bạn có chắc muốn sinh ra một mã OTP khẩn cấp dùng chung cho tất cả nhân viên? (Có hiệu lực 10 phút)')) return;
@@ -622,9 +669,14 @@ function ConfigTab() {
 
   const fetchConfigs = async () => {
     setLoading(true);
-    const res = await fetch('/api/admin/data?type=configs');
-    const data = await res.json();
+    const [configRes, autoCloseRes] = await Promise.all([
+      fetch('/api/admin/data?type=configs'),
+      fetch('/api/admin/auto-close-open-in'),
+    ]);
+    const data = await configRes.json();
+    const autoCloseData = await autoCloseRes.json();
     setConfigs(Array.isArray(data) ? data as SystemConfig[] : []);
+    if (autoCloseRes.ok) setAutoCloseConfig(autoCloseData as AutoCloseOpenInConfig);
     setLoading(false);
   };
 
@@ -645,61 +697,166 @@ function ConfigTab() {
     else fetchConfigs();
   };
 
-  return (
-    <div className="space-y-6 animate-fade-in max-w-4xl">
-      <header className="border-b border-slate-200 pb-4 flex justify-between items-start">
-        <div>
-          <h2 className="text-2xl font-bold font-outfit text-slate-800">Biến Hệ Thống & Cấu Hình</h2>
-          <p className="text-sm text-slate-500 mt-1">Thay đổi các thông số kỹ thuật hoạt động của Bot tự động</p>
-        </div>
-        
-        <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl max-w-sm text-center shadow-sm">
-          <h3 className="font-bold text-rose-700 flex items-center justify-center gap-2 mb-2">
-            <ShieldAlert size={18} /> Cấp Mã OTP Khẩn Cấp
-          </h3>
-          <p className="text-xs text-rose-600 mb-3 leading-relaxed">
-            Dùng khi nhân viên bị lỗi không nhận được email. Mã dùng chung toàn viện và có thời hạn 10 phút.
-          </p>
-          <button 
-            onClick={generateMasterOtp}
-            disabled={generatingOtp}
-            className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 rounded-lg text-sm transition"
-          >
-            {generatingOtp ? 'Đang tạo...' : 'Tạo Mã Ngay'}
-          </button>
-          {masterOtp && (
-            <div className="mt-4 pt-4 border-t border-rose-200 animate-fade-in">
-              <p className="text-xs font-semibold text-rose-600 uppercase tracking-wider mb-1">Mã của bạn</p>
-              <p className="text-4xl font-mono font-black text-rose-800 tracking-[0.2em]">{masterOtp}</p>
-            </div>
-          )}
-        </div>
-      </header>
+  const requestAutoCloseChange = async () => {
+    if (autoCloseTarget === null) return;
+    setSavingAutoClose(true);
+    try {
+      const res = await fetch('/api/admin/auto-close-open-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: autoCloseTarget, admin_email: adminEmail }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Lỗi khi cập nhật công tắc.');
+      } else {
+        setAutoCloseConfig(data as AutoCloseOpenInConfig);
+        await fetchConfigs();
+      }
+    } catch {
+      alert('Lỗi kết nối.');
+    } finally {
+      setSavingAutoClose(false);
+      setAutoCloseTarget(null);
+    }
+  };
 
-      {loading ? <p>Loading...</p> : (
-        <div className="space-y-4">
-          {configs.map(cf => (
-            <div key={cf.key} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
-              <div className="max-w-xl">
-                <h4 className="font-bold text-slate-800 tracking-wider text-sm">{cf.mo_ta || cf.key}</h4>
-                <p className="text-xs text-slate-500 mt-1 font-mono">{cf.key}</p>
+  const effectiveDisplay = autoCloseConfig?.effectiveDate || getClientVNDatePlus(7);
+  const activeAutoCloseValue = autoCloseConfig?.pendingValue ?? autoCloseConfig?.enabled ?? true;
+  const displayConfigs = configs.filter((cf) => cf.key !== 'AUTO_CLOSE_OPEN_IN_ENABLED');
+
+  return (
+    <>
+      <div className="space-y-6 animate-fade-in max-w-4xl">
+        <header className="border-b border-slate-200 pb-4 flex justify-between items-start">
+          <div>
+            <h2 className="text-2xl font-bold font-outfit text-slate-800">Biến Hệ Thống & Cấu Hình</h2>
+            <p className="text-sm text-slate-500 mt-1">Thay đổi các thông số kỹ thuật hoạt động của Bot tự động</p>
+          </div>
+          
+          <div className="bg-rose-50 border border-rose-200 p-4 rounded-xl max-w-sm text-center shadow-sm">
+            <h3 className="font-bold text-rose-700 flex items-center justify-center gap-2 mb-2">
+              <ShieldAlert size={18} /> Cấp Mã OTP Khẩn Cấp
+            </h3>
+            <p className="text-xs text-rose-600 mb-3 leading-relaxed">
+              Dùng khi nhân viên bị lỗi không nhận được email. Mã dùng chung toàn viện và có thời hạn 10 phút.
+            </p>
+            <button 
+              onClick={generateMasterOtp}
+              disabled={generatingOtp}
+              className="w-full bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 rounded-lg text-sm transition"
+            >
+              {generatingOtp ? 'Đang tạo...' : 'Tạo Mã Ngay'}
+            </button>
+            {masterOtp && (
+              <div className="mt-4 pt-4 border-t border-rose-200 animate-fade-in">
+                <p className="text-xs font-semibold text-rose-600 uppercase tracking-wider mb-1">Mã của bạn</p>
+                <p className="text-4xl font-mono font-black text-rose-800 tracking-[0.2em]">{masterOtp}</p>
               </div>
-              <div className="flex items-center gap-3 w-1/3">
-                <input 
-                  type="text" 
-                  defaultValue={cf.value} 
-                  onBlur={(e) => {
-                    if (e.target.value !== cf.value) handleUpdate(cf.key, e.target.value);
-                  }}
-                  className="w-full p-2 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-primary outline-none"
-                />
-                <span className="text-xs text-slate-400 font-mono">[{cf.kieu_du_lieu}]</span>
-              </div>
+            )}
+          </div>
+        </header>
+
+        <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className={`h-3 w-3 rounded-full ${activeAutoCloseValue ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+              <h3 className="font-bold text-slate-800">Tự sinh OUT khi check-in ca mới</h3>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
+            <p className="text-sm text-slate-500 max-w-2xl">
+              Trạng thái hiện tại: <b>{autoCloseConfig?.enabled === false ? 'Tắt' : 'Bật'}</b>
+              {autoCloseConfig?.pendingValue !== null && autoCloseConfig?.pendingValue !== undefined && (
+                <span className="ml-2 text-amber-700">
+                  Chờ áp dụng: <b>{autoCloseConfig.pendingValue ? 'Bật' : 'Tắt'}</b> từ <b>{autoCloseConfig.effectiveDate}</b>
+                </span>
+              )}
+            </p>
+            {autoCloseConfig?.updatedBy && (
+              <p className="text-xs text-slate-400">Cập nhật gần nhất bởi {autoCloseConfig.updatedBy}</p>
+            )}
+          </div>
+          <button
+            onClick={() => setAutoCloseTarget(!activeAutoCloseValue)}
+            disabled={loading || savingAutoClose}
+            className={`px-5 py-3 rounded-xl text-sm font-bold text-white shadow-sm transition ${
+              activeAutoCloseValue ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
+          >
+            {activeAutoCloseValue ? 'Lên lịch tắt' : 'Lên lịch bật'}
+          </button>
+        </section>
+
+        {loading ? <p>Loading...</p> : (
+          <div className="space-y-4">
+            {displayConfigs.map(cf => {
+              const isReadonly = SYSTEM_READONLY_CONFIG_KEYS.has(cf.key);
+              const isAutoGenerated = AUTO_CLOSE_CONFIG_KEYS.has(cf.key);
+              const isBoolean = isBooleanConfig(cf);
+
+              return (
+              <div key={cf.key} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
+                <div className="max-w-xl">
+                  <h4 className="font-bold text-slate-800 tracking-wider text-sm">{cf.mo_ta || cf.key}</h4>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">{cf.key}</p>
+                  {isReadonly && (
+                    <p className="text-[11px] text-slate-400 mt-2">
+                      {isAutoGenerated ? 'Hệ thống tự điền khi bật/tắt công tắc.' : 'Hệ thống tự sinh, không nhập tay.'}
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-3 w-1/3">
+                  {isReadonly ? (
+                    <div className="w-full min-h-11 px-3 py-2 rounded-lg bg-slate-900 text-slate-100 border border-slate-700 text-center font-bold flex items-center justify-center">
+                      <span className={cf.value ? '' : 'text-slate-500 text-xs'}>{cf.value || 'Hệ thống tự điền'}</span>
+                    </div>
+                  ) : isBoolean ? (
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={cf.value === 'true'}
+                      onClick={() => handleUpdate(cf.key, cf.value === 'true' ? 'false' : 'true')}
+                      className={`relative h-9 w-20 rounded-full p-1 transition ${
+                        cf.value === 'true' ? 'bg-emerald-600' : 'bg-slate-300'
+                      }`}
+                    >
+                      <span
+                        className={`block h-7 w-7 rounded-full bg-white shadow transition ${
+                          cf.value === 'true' ? 'translate-x-11' : 'translate-x-0'
+                        }`}
+                      />
+                      <span className="sr-only">{cf.value === 'true' ? 'Bật' : 'Tắt'}</span>
+                    </button>
+                  ) : (
+                    <input
+                      type={cf.kieu_du_lieu === 'number' || cf.kieu_du_lieu === 'NUMBER' ? 'number' : 'text'}
+                      defaultValue={cf.value}
+                      onBlur={(e) => {
+                        if (e.target.value !== cf.value) handleUpdate(cf.key, e.target.value);
+                      }}
+                      className="w-full p-2 border border-slate-300 rounded-lg text-center font-bold focus:ring-2 focus:ring-primary outline-none"
+                    />
+                  )}
+                  <span className="text-xs text-slate-400 font-mono">[{cf.kieu_du_lieu}]</span>
+                </div>
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <ConfirmModal
+        isOpen={autoCloseTarget !== null}
+        onClose={() => setAutoCloseTarget(null)}
+        onConfirm={requestAutoCloseChange}
+        title={`${autoCloseTarget ? 'Bật' : 'Tắt'} tự sinh OUT`}
+        message={`Thay đổi này sẽ có hiệu lực từ ngày ${effectiveDisplay}. Trước mốc đó hệ thống vẫn dùng trạng thái hiện tại; khi đến ngày hiệu lực, các IN thiếu OUT đủ điều kiện sẽ được chốt trước khi áp dụng trạng thái mới.`}
+        confirmText="Lên lịch áp dụng"
+        cancelText="Quay lại"
+        type={autoCloseTarget ? 'info' : 'warning'}
+        isLoading={savingAutoClose}
+      />
+    </>
   );
 }
 
@@ -778,6 +935,7 @@ function FraudTab() {
   const [managerFrauds, setManagerFrauds] = useState<ManagerFraudResponse>({ recent: [], summary: [] });
   const [loadingManager, setLoadingManager] = useState(true);
   const [searchManager, setSearchManager] = useState('');
+  const [selectedManagerKey, setSelectedManagerKey] = useState<string | null>(null);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -785,7 +943,11 @@ function FraudTab() {
     });
     fetch('/api/admin/manager-fraud')
       .then(r => r.json())
-      .then((data: ManagerFraudResponse) => { setManagerFrauds(data); setLoadingManager(false); })
+      .then((data: ManagerFraudResponse) => {
+        setManagerFrauds(data);
+        setSelectedManagerKey(data.summary?.[0]?.key ?? null);
+        setLoadingManager(false);
+      })
       .catch(() => setLoadingManager(false));
   }, []);
 
@@ -799,11 +961,16 @@ function FraudTab() {
     return matchSearch && matchKhoa;
   });
 
-  const filteredManager = managerFrauds.recent.filter(r =>
-    !searchManager ||
-    (r.ho_ten ?? '').toLowerCase().includes(searchManager.toLowerCase()) ||
-    (r.ma_nv ?? '').toLowerCase().includes(searchManager.toLowerCase())
-  );
+  const selectedManager = managerFrauds.summary.find((s) => s.key === selectedManagerKey) ?? null;
+  const filteredManager = managerFrauds.recent.filter(r => {
+    const matchSelection = selectedManager
+      ? r.ho_tro_boi === selectedManager.manager && r.khoa === selectedManager.khoa
+      : true;
+    const matchSearch = !searchManager ||
+      (r.ho_ten ?? '').toLowerCase().includes(searchManager.toLowerCase()) ||
+      (r.ma_nv ?? '').toLowerCase().includes(searchManager.toLowerCase());
+    return matchSelection && matchSearch;
+  });
 
   // Group fraudSummary by khoa
   const groupedByKhoa = filteredFraud.reduce<Record<string, FraudSummaryItem[]>>((acc, item) => {
@@ -888,7 +1055,6 @@ function FraudTab() {
                     <tr>
                       <th className="px-4 py-3">Mã NV</th>
                       <th className="px-4 py-3">Họ Tên</th>
-                      <th className="px-4 py-3 text-center">Số lần</th>
                       <th className="px-4 py-3">Lỗi vi phạm</th>
                     </tr>
                   </thead>
@@ -897,11 +1063,6 @@ function FraudTab() {
                       <tr key={item.ma_nv} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-mono text-xs text-slate-500">{item.ma_nv}</td>
                         <td className="px-4 py-3 font-bold text-slate-800">{item.ho_ten}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold ${
-                            item.so_lan >= 3 ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                          }`}>{item.so_lan}</span>
-                        </td>
                         <td className="px-4 py-3 text-xs text-slate-600">{item.loi_vi_pham || '---'}</td>
                       </tr>
                     ))}
@@ -944,7 +1105,13 @@ function FraudTab() {
                       <tr><td colSpan={3} className="p-4 text-center text-slate-500">Không có dữ liệu.</td></tr>
                     )}
                     {managerFrauds.summary.map(s => (
-                      <tr key={s.manager} className="hover:bg-slate-50">
+                      <tr
+                        key={s.key}
+                        onClick={() => setSelectedManagerKey(s.key)}
+                        className={`cursor-pointer transition ${
+                          selectedManagerKey === s.key ? 'bg-amber-50' : 'hover:bg-slate-50'
+                        }`}
+                      >
                         <td className="p-3 font-bold text-slate-800">{s.manager}</td>
                         <td className="p-3 text-slate-600">{s.khoa}</td>
                         <td className="p-3 text-center">
@@ -961,7 +1128,14 @@ function FraudTab() {
               {/* Lịch sử gần đây */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                 <div className="bg-slate-50 border-b border-slate-200 px-4 py-3">
-                  <h4 className="font-bold text-slate-600 text-sm uppercase">Lịch Sử Can Thiệp Gần Đây</h4>
+                  <h4 className="font-bold text-slate-600 text-sm uppercase">
+                    Lịch Sử Can Thiệp Gần Đây
+                    {selectedManager && (
+                      <span className="ml-2 normal-case text-xs text-slate-400">
+                        {selectedManager.khoa} / {selectedManager.manager}
+                      </span>
+                    )}
+                  </h4>
                 </div>
                 <div className="max-h-[360px] overflow-y-auto">
                   <table className="w-full text-xs text-left">
@@ -1254,7 +1428,7 @@ function RandomCheckTab({ queue = [] }: RandomCheckTabProps) {
   };
 
   const copyLink = (token: string) => {
-    const link = `${window.location.origin}/attendance/snap?token=${token}`;
+    const link = `${window.location.origin}/check-in/random/${token}`;
     navigator.clipboard.writeText(link);
     alert('Đã copy link gửi cho nhân viên!');
   };

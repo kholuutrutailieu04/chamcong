@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { use, useState, useEffect, useRef } from 'react';
 import Image from 'next/image';
 import { Camera, MapPin, CheckCircle2, AlertCircle, ShieldAlert } from 'lucide-react';
 import { useToast } from '@/components/ui/ToastProvider';
@@ -10,7 +10,8 @@ interface RandomCheckSession {
   khoa_hien_tai: string | null;
 }
 
-export default function RandomCheckPage({ params }: { params: { token: string } }) {
+export default function RandomCheckPage({ params }: { params: Promise<{ token: string }> }) {
+  const { token } = use(params);
   const [session, setSession] = useState<RandomCheckSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -24,14 +25,14 @@ export default function RandomCheckPage({ params }: { params: { token: string } 
   const [gps, setGps] = useState<{lat: number, lon: number} | null>(null);
 
   useEffect(() => {
-    fetch(`/api/random-check/submit?token=${params.token}`)
+    fetch(`/api/random-check/submit?token=${token}`)
       .then(res => res.json())
       .then(data => {
         if (data.error) setError(data.error);
         else setSession(data);
         setLoading(false);
       });
-  }, [params.token]);
+  }, [token]);
 
   const startCamera = async () => {
     try {
@@ -77,7 +78,7 @@ export default function RandomCheckPage({ params }: { params: { token: string } 
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          token: params.token,
+          token,
           lat: gps.lat,
           lon: gps.lon,
           imageBase64: capturedImage

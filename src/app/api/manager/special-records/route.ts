@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
+import { getCurrentVNMonth, getVNMonthRangeUTC, toVNDateString } from '@/lib/timezone';
 
 export async function GET(req: NextRequest) {
   const khoa = req.nextUrl.searchParams.get('khoa');
@@ -10,16 +11,10 @@ export async function GET(req: NextRequest) {
   }
 
   if (!thang) {
-    const now = new Date();
-    thang = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    thang = getCurrentVNMonth();
   }
 
-  const [yearStr, monthStr] = thang.split('-');
-  const year = parseInt(yearStr);
-  const month = parseInt(monthStr);
-
-  const startDate = new Date(Date.UTC(year, month - 1, 1)).toISOString();
-  const endDate = new Date(Date.UTC(year, month, 1)).toISOString();
+  const { startUTC, endUTC } = getVNMonthRangeUTC(thang);
 
   const admin = getAdminClient();
 
@@ -30,8 +25,8 @@ export async function GET(req: NextRequest) {
       .select('ma_nv, thoi_gian')
       .eq('loai_ca', 'NGHI_BU')
       .eq('khoa_ghi_nhan', khoa)
-      .gte('thoi_gian', startDate)
-      .lt('thoi_gian', endDate);
+      .gte('thoi_gian', startUTC)
+      .lte('thoi_gian', endUTC);
 
     if (err1) throw err1;
 
@@ -42,7 +37,7 @@ export async function GET(req: NextRequest) {
     // Build a set of "ma_nv|YYYY-MM-DD" that have NGHI_BU
     const restDays = new Set(
       nghiBuRecords.map((r) => {
-        const dateStr = new Date(r.thoi_gian!).toISOString().split('T')[0];
+        const dateStr = toVNDateString(new Date(r.thoi_gian!));
         return `${r.ma_nv}|${dateStr}`;
       })
     );
@@ -53,8 +48,8 @@ export async function GET(req: NextRequest) {
       .select('id, ma_nv, ho_ten, thoi_gian, loai_ca, ghi_chu, in_record_id')
       .in('loai_ca', ['IN_LAM', 'IN_TRUC', 'OUT'])
       .eq('khoa_ghi_nhan', khoa)
-      .gte('thoi_gian', startDate)
-      .lt('thoi_gian', endDate);
+      .gte('thoi_gian', startUTC)
+      .lte('thoi_gian', endUTC);
 
     if (err2) throw err2;
 
@@ -66,7 +61,7 @@ export async function GET(req: NextRequest) {
     for (const inRec of inRecords) {
       if (!inRec.ma_nv || !inRec.thoi_gian) continue;
       
-      const dateStr = new Date(inRec.thoi_gian).toISOString().split('T')[0];
+      const dateStr = toVNDateString(new Date(inRec.thoi_gian));
       const key = `${inRec.ma_nv}|${dateStr}`;
 
       // If they checked in on a NGHI_BU day
