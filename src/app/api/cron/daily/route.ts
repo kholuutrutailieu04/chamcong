@@ -3,6 +3,8 @@ import { getAdminClient } from '@/lib/supabase';
 import { cleanupSandboxData, archivePreviousMonthAttendance } from '@/lib/cleanup';
 import { getTodayVN } from '@/lib/timezone';
 import { applyDueAutoCloseConfig } from '@/lib/auto-close-open-in';
+import { runDueAutoEmailReports } from '@/lib/auto-email-report';
+import { recomputeAttendanceSummaryForRecentDays } from '@/lib/attendance-summary';
 
 // Helper: Ensure the API requires a cron secret for security (optional but recommended)
 export async function GET(req: Request) {
@@ -16,6 +18,12 @@ export async function GET(req: Request) {
 
   try {
     const autoCloseConfig = await applyDueAutoCloseConfig(admin);
+    const autoEmailReport = await runDueAutoEmailReports(admin);
+    const currentDay = Number(today.slice(8, 10));
+    const autoExportReachedReportStep = autoEmailReport.enabled
+      && autoEmailReport.due
+      && (autoEmailReport.sent + autoEmailReport.failed + autoEmailReport.skipped > 0);
+    const shouldRunMaintenance = currentDay >= 10 || autoExportReachedReportStep;
 
     // 0. Kiểm tra ngày lễ
     const { data: isHoliday } = await admin
@@ -23,16 +31,6 @@ export async function GET(req: Request) {
       .select('ten_ngay_le')
       .eq('ngay', today)
       .maybeSingle();
-
-    if (isHoliday) {
-      const cleanupResult = await cleanupSandboxData(admin);
-      return NextResponse.json({ 
-        success: true, 
-        message: `Hôm nay là ngày lễ (${isHoliday.ten_ngay_le}), không ghi phép tự động.`,
-        auto_close_open_in: autoCloseConfig,
-        cleanup: cleanupResult
-      });
-    }
 
     // 1. Tim cac don vang (phep, om, thai san...) dang co hieu luc hom nay
     // Doc them buoi_nghi de phan loai nghi theo buoi sang / chieu
@@ -66,14 +64,7 @@ export async function GET(req: Request) {
 
     // Mang chuan hoa: resolve loai_ca thuc te dua vao loai_nghi + buoi_nghi
     type LeaveRow = { ma_nv: string | null; ho_ten: string | null; loai_nghi: string; buoi_nghi?: string | null };
-    const allLeaves: LeaveRow[] = [...(activeLeaves ?? []), ...restLogs];
-
-    if (allLeaves.length === 0) {
-      return NextResponse.json({
-        message: 'Khong co don phep/nghi bu nao trong hom nay.',
-        auto_close_open_in: autoCloseConfig,
-      });
-    }
+    const allLeaves: LeaveRow[] = isHoliday ? [] : [...(activeLeaves ?? []), ...restLogs];
 
     /**
      * Resolve loai_ca thuc te se ghi vao lich_su_cham_cong:
@@ -102,6 +93,7 @@ export async function GET(req: Request) {
 
     // Bo qua cac ca da duoc chen (tranh chay cron nhieu lan bi duplicate)
     // Duplicate-check theo loai_ca da resolve (phan biet NGHI_PHEP_SANG voi NGHI_PHEP_CHIEU)
+    let insertedCount = 0;
     for (const log of logsToInsert) {
       if (!log.ma_nv) continue; // Bo qua neu khong co ma_nv
       const { data: existing } = await admin
@@ -114,19 +106,35 @@ export async function GET(req: Request) {
 
       if (!existing || existing.length === 0) {
         await admin.from('lich_su_cham_cong').insert(log);
+        insertedCount += 1;
       }
     }
 
-    // 3. Dọn dẹp dữ liệu Sandbox (Test Data)
-    const cleanupResult = await cleanupSandboxData(admin);
+    // 3. Recompute summary gần nhất để hoàn phép theo từng ngày/buổi và làm nền payroll/export.
+    const summaryResult = await recomputeAttendanceSummaryForRecentDays(admin, 7);
 
-    // 4. Tự động lưu trữ dữ liệu tháng cũ khi qua ngày 10+
-    const archiveResult = await archivePreviousMonthAttendance(admin);
+    // 4. Maintenance chỉ chạy sau mốc an toàn tháng mới, hoặc sau auto export đã sinh báo cáo.
+    const cleanupResult = shouldRunMaintenance ? await cleanupSandboxData(admin) : {
+      success: true,
+      skipped: true,
+      message: 'Chưa đến mốc maintenance an toàn.',
+    };
+
+    const archiveResult = shouldRunMaintenance
+      ? await archivePreviousMonthAttendance(admin, { force: autoExportReachedReportStep })
+      : { success: true, skipped: true, message: 'Chưa đến mốc archive an toàn.', archived_count: 0, archived_summary_count: 0 };
 
     return NextResponse.json({ 
       success: true, 
-      inserted_count: logsToInsert.length,
+      message: isHoliday
+        ? `Hôm nay là ngày lễ (${isHoliday.ten_ngay_le}), không ghi phép tự động.`
+        : allLeaves.length === 0
+          ? 'Không có đơn phép/nghỉ bù nào trong hôm nay.'
+          : 'Đã xử lý phép/nghỉ bù trong ngày.',
+      inserted_count: insertedCount,
       auto_close_open_in: autoCloseConfig,
+      auto_email_report: autoEmailReport,
+      summary: summaryResult,
       cleanup: cleanupResult,
       archive: archiveResult
     });

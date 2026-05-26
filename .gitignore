@@ -35,6 +35,7 @@ chamcong-bvpsn-*.json
 
 # local/internal docs and database notes
 /local-docs/
+/scripts/gas/
 /database/
 /AGENTS.md
 

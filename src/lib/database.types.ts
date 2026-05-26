@@ -9,6 +9,141 @@ export type Json =
 export interface Database {
   public: {
     Tables: {
+      bang_cong_ngay: {
+        Row: {
+          id: string
+          ma_nv: string
+          ngay: string
+          thang: string
+          ma_khoa: string | null
+          work_minutes: number
+          late_minutes: number
+          early_leave_minutes: number
+          overtime_minutes: number
+          leave_paid_days: number
+          leave_refunded_days: number
+          unpaid_absence_minutes: number
+          payroll_symbol: string | null
+          source_status: string
+          needs_review: boolean
+          raw_record_ids: Json
+          computed_at: string
+        }
+        Insert: {
+          id?: string
+          ma_nv: string
+          ngay: string
+          thang: string
+          ma_khoa?: string | null
+          work_minutes?: number
+          late_minutes?: number
+          early_leave_minutes?: number
+          overtime_minutes?: number
+          leave_paid_days?: number
+          leave_refunded_days?: number
+          unpaid_absence_minutes?: number
+          payroll_symbol?: string | null
+          source_status?: string
+          needs_review?: boolean
+          raw_record_ids?: Json
+          computed_at?: string
+        }
+        Update: {
+          id?: string
+          ma_nv?: string
+          ngay?: string
+          thang?: string
+          ma_khoa?: string | null
+          work_minutes?: number
+          late_minutes?: number
+          early_leave_minutes?: number
+          overtime_minutes?: number
+          leave_paid_days?: number
+          leave_refunded_days?: number
+          unpaid_absence_minutes?: number
+          payroll_symbol?: string | null
+          source_status?: string
+          needs_review?: boolean
+          raw_record_ids?: Json
+          computed_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "bang_cong_ngay_ma_khoa_fkey"
+            columns: ["ma_khoa"]
+            isOneToOne: false
+            referencedRelation: "dm_khoa_phong"
+            referencedColumns: ["ma_khoa"]
+          },
+          {
+            foreignKeyName: "bang_cong_ngay_ma_nv_fkey"
+            columns: ["ma_nv"]
+            isOneToOne: false
+            referencedRelation: "nhan_vien"
+            referencedColumns: ["ma_nv"]
+          },
+        ]
+      }
+      bang_cong_ngay_archive: {
+        Row: {
+          id: string
+          ma_nv: string
+          ngay: string
+          thang: string
+          ma_khoa: string | null
+          work_minutes: number
+          late_minutes: number
+          early_leave_minutes: number
+          overtime_minutes: number
+          leave_paid_days: number
+          leave_refunded_days: number
+          unpaid_absence_minutes: number
+          payroll_symbol: string | null
+          source_status: string
+          needs_review: boolean
+          raw_record_ids: Json
+          computed_at: string
+        }
+        Insert: {
+          id?: string
+          ma_nv: string
+          ngay: string
+          thang: string
+          ma_khoa?: string | null
+          work_minutes?: number
+          late_minutes?: number
+          early_leave_minutes?: number
+          overtime_minutes?: number
+          leave_paid_days?: number
+          leave_refunded_days?: number
+          unpaid_absence_minutes?: number
+          payroll_symbol?: string | null
+          source_status?: string
+          needs_review?: boolean
+          raw_record_ids?: Json
+          computed_at?: string
+        }
+        Update: {
+          id?: string
+          ma_nv?: string
+          ngay?: string
+          thang?: string
+          ma_khoa?: string | null
+          work_minutes?: number
+          late_minutes?: number
+          early_leave_minutes?: number
+          overtime_minutes?: number
+          leave_paid_days?: number
+          leave_refunded_days?: number
+          unpaid_absence_minutes?: number
+          payroll_symbol?: string | null
+          source_status?: string
+          needs_review?: boolean
+          raw_record_ids?: Json
+          computed_at?: string
+        }
+        Relationships: []
+      }
       bang_truc_noi_bo: {
         Row: {
           id: string
@@ -797,6 +932,60 @@ export interface Database {
           loai?: string | null
         }
         Relationships: []
+      }
+      phep_quota_transactions: {
+        Row: {
+          id: string
+          leave_id: string
+          ma_nv: string
+          ngay: string
+          buoi_nghi: string
+          amount_days: number
+          transaction_type: string
+          reason: string | null
+          source: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          leave_id: string
+          ma_nv: string
+          ngay: string
+          buoi_nghi: string
+          amount_days: number
+          transaction_type: string
+          reason?: string | null
+          source: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          leave_id?: string
+          ma_nv?: string
+          ngay?: string
+          buoi_nghi?: string
+          amount_days?: number
+          transaction_type?: string
+          reason?: string | null
+          source?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "phep_quota_transactions_leave_id_fkey"
+            columns: ["leave_id"]
+            isOneToOne: false
+            referencedRelation: "don_nghi_phep"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "phep_quota_transactions_ma_nv_fkey"
+            columns: ["ma_nv"]
+            isOneToOne: false
+            referencedRelation: "nhan_vien"
+            referencedColumns: ["ma_nv"]
+          },
+        ]
       }
       nhan_vien: {
         Row: {

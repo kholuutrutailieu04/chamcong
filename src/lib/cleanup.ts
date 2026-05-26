@@ -102,6 +102,19 @@ export async function cleanupSandboxData(admin: SupabaseClient<Database>) {
         .in('source_record_id', [...testIds]);
     }
 
+    for (const table of ['phep_quota_transactions', 'bang_cong_ngay', 'bang_cong_ngay_archive'] as const) {
+      const { error: delErr, count } = await admin
+        .from(table)
+        .delete({ count: 'exact' })
+        .like('ma_nv', 'NV_TEST_%');
+
+      if (delErr) {
+        report.errors.push(`DB delete ${table}: ${delErr.message}`);
+      } else {
+        report.db_deleted += count ?? 0;
+      }
+    }
+
     return { success: true, report };
   } catch (error: unknown) {
     console.error('Cleanup Sandbox Error:', error);
@@ -109,17 +122,21 @@ export async function cleanupSandboxData(admin: SupabaseClient<Database>) {
   }
 }
 
-export async function archivePreviousMonthAttendance(admin: SupabaseClient<Database>) {
+export async function archivePreviousMonthAttendance(
+  admin: SupabaseClient<Database>,
+  options: { force?: boolean } = {},
+) {
   const today = getTodayVN();
   const currentDay = Number(today.slice(8, 10));
   
-  // Chỉ chạy khi từ ngày 10 trở đi trong tháng
-  if (currentDay < 10) {
+  // Mặc định chỉ chạy khi đã qua giai đoạn đầu tháng; auto export có thể force sau khi đã sinh báo cáo.
+  if (currentDay < 10 && !options.force) {
     return { success: true, message: 'Chưa đến ngày 10, chưa chạy dọn dẹp tháng cũ.', archived_count: 0 };
   }
 
   const currentMonth = today.slice(0, 7); // YYYY-MM
   const { startUTC: currentMonthStartUTC } = getVNMonthRangeUTC(currentMonth);
+  const currentMonthStartDate = `${currentMonth}-01`;
 
   try {
     // 1. Lấy tất cả các bản ghi của tháng trước trở về trước (tối đa 1000 bản ghi mỗi lần để tránh quá tải)
@@ -131,49 +148,74 @@ export async function archivePreviousMonthAttendance(admin: SupabaseClient<Datab
 
     if (fetchErr) throw fetchErr;
 
-    if (!oldRecords || oldRecords.length === 0) {
-      return { success: true, message: 'Không có dữ liệu tháng cũ cần lưu trữ.', archived_count: 0 };
+    let archivedAttendanceCount = 0;
+    if (oldRecords && oldRecords.length > 0) {
+      // 2. Chèn vào bảng archive
+      const archiveData = oldRecords.map(r => ({
+        id: r.id,
+        thoi_gian: r.thoi_gian,
+        ma_nv: r.ma_nv,
+        ho_ten: r.ho_ten,
+        khoa_ghi_nhan: r.khoa_ghi_nhan,
+        loai_ca: r.loai_ca,
+        link_anh_minh_chung: r.link_anh_minh_chung,
+        ghi_chu: r.ghi_chu,
+        ma_co_so: r.ma_co_so,
+        is_suspicious: r.is_suspicious,
+        in_record_id: r.in_record_id,
+        is_test: r.is_test,
+        ho_tro_boi: r.ho_tro_boi,
+      }));
+
+      const { error: insertErr } = await admin
+        .from('lich_su_cham_cong_archive')
+        .upsert(archiveData, { onConflict: 'id' });
+
+      if (insertErr) throw insertErr;
+
+      // 3. Xóa các bản ghi cũ ở bảng chính sau khi archive thành công
+      const oldIds = oldRecords.map(r => r.id);
+      const { error: deleteErr } = await admin
+        .from('lich_su_cham_cong')
+        .delete()
+        .in('id', oldIds);
+
+      if (deleteErr) throw deleteErr;
+      archivedAttendanceCount = oldRecords.length;
     }
 
-    // 2. Chèn vào bảng archive
-    const archiveData = oldRecords.map(r => ({
-      id: r.id,
-      thoi_gian: r.thoi_gian,
-      ma_nv: r.ma_nv,
-      ho_ten: r.ho_ten,
-      khoa_ghi_nhan: r.khoa_ghi_nhan,
-      loai_ca: r.loai_ca,
-      link_anh_minh_chung: r.link_anh_minh_chung,
-      ghi_chu: r.ghi_chu,
-      ma_co_so: r.ma_co_so,
-      is_suspicious: r.is_suspicious,
-      in_record_id: r.in_record_id,
-      is_test: r.is_test,
-      ho_tro_boi: r.ho_tro_boi,
-    }));
+    const { data: oldSummaries, error: summaryFetchErr } = await admin
+      .from('bang_cong_ngay')
+      .select('*')
+      .lt('ngay', currentMonthStartDate)
+      .limit(1000);
 
-    const { error: insertErr } = await admin
-      .from('lich_su_cham_cong_archive')
-      .insert(archiveData);
+    if (summaryFetchErr) throw summaryFetchErr;
 
-    if (insertErr) throw insertErr;
+    let archivedSummaryCount = 0;
+    if (oldSummaries && oldSummaries.length > 0) {
+      const { error: summaryInsertErr } = await admin
+        .from('bang_cong_ngay_archive')
+        .upsert(oldSummaries, { onConflict: 'id' });
+      if (summaryInsertErr) throw summaryInsertErr;
 
-    // 3. Xóa các bản ghi cũ ở bảng chính
-    const oldIds = oldRecords.map(r => r.id);
-    const { error: deleteErr } = await admin
-      .from('lich_su_cham_cong')
-      .delete()
-      .in('id', oldIds);
+      const { error: summaryDeleteErr } = await admin
+        .from('bang_cong_ngay')
+        .delete()
+        .in('id', oldSummaries.map((row) => row.id));
+      if (summaryDeleteErr) throw summaryDeleteErr;
 
-    if (deleteErr) throw deleteErr;
+      archivedSummaryCount = oldSummaries.length;
+    }
 
     return { 
       success: true, 
-      message: `Đã lưu trữ thành công ${oldRecords.length} bản ghi tháng cũ.`, 
-      archived_count: oldRecords.length 
+      message: `Đã lưu trữ ${archivedAttendanceCount} log và ${archivedSummaryCount} summary tháng cũ.`, 
+      archived_count: archivedAttendanceCount,
+      archived_summary_count: archivedSummaryCount,
     };
   } catch (error: unknown) {
     console.error('Archive Previous Month Attendance Error:', error);
-    return { success: false, error: error instanceof Error ? error.message : error, archived_count: 0 };
+    return { success: false, error: error instanceof Error ? error.message : error, archived_count: 0, archived_summary_count: 0 };
   }
 }

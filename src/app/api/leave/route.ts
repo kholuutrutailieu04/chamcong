@@ -2,6 +2,14 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import type { Json } from '@/lib/database.types';
 import { getTodayVN } from '@/lib/timezone';
+import {
+  LEAVE_TRANSACTION_SOURCES,
+  buildLeaveUnits,
+  createLeaveDebitTransactions,
+  creditLeaveUnits,
+  normalizeLeaveHalfDay,
+  sumLeaveUnits,
+} from '@/lib/attendance-summary';
 
 type LeaveAuditEntry = {
   action: 'CREATE' | 'CANCEL';
@@ -44,7 +52,7 @@ export async function POST(req: NextRequest) {
   try {
     const { ma_nv, tu_ngay, den_ngay, loai_nghi, manager_email, buoi_nghi } = await req.json();
     // buoi_nghi: 'CA_NGAY' (mặc định) | 'SANG' | 'CHIEU'
-    const buoiNghiValue: string = ['SANG', 'CHIEU'].includes(buoi_nghi) ? buoi_nghi : 'CA_NGAY';
+    const buoiNghiValue = normalizeLeaveHalfDay(buoi_nghi);
 
     if (!ma_nv || !tu_ngay || !den_ngay || !loai_nghi || !manager_email) {
        return NextResponse.json({ error: 'Thiếu thông tin bắt buộc' }, { status: 400 });
@@ -53,6 +61,9 @@ export async function POST(req: NextRequest) {
     // Tính số ngày nghỉ liên tiếp (số ngày)
     const t1 = new Date(tu_ngay).getTime();
     const t2 = new Date(den_ngay).getTime();
+    if (Number.isNaN(t1) || Number.isNaN(t2) || t2 < t1) {
+      return NextResponse.json({ error: 'Khoảng thời gian không hợp lệ' }, { status: 400 });
+    }
     // Khọn nghỉ theo buổi chỉ được áp dụng cho đơn trong cùng 1 ngày (tu_ngay == den_ngay)
     if (buoiNghiValue !== 'CA_NGAY' && tu_ngay !== den_ngay) {
       return NextResponse.json(
@@ -61,10 +72,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Nhân hệ số theo buổi: CA_NGAY = 1.0, SANG/CHIEU = 0.5
-    const dayMultiplier = buoiNghiValue === 'CA_NGAY' ? 1.0 : 0.5;
-    // sumDays: số ngày thực tế (có thể là 0.5)
-    const sumDays = (Math.round((t2 - t1) / (1000 * 60 * 60 * 24)) + 1) * dayMultiplier;
+    const leaveUnits = buildLeaveUnits({
+      leaveId: 'pending',
+      maNv: ma_nv,
+      tuNgay: tu_ngay,
+      denNgay: den_ngay,
+      buoiNghi: buoiNghiValue,
+    });
+    const sumDays = sumLeaveUnits(leaveUnits);
 
     if (sumDays <= 0) return NextResponse.json({ error: 'Khoảng thời gian không hợp lệ' }, { status: 400 });
 
@@ -93,7 +108,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 3. Kiểm tra và trừ Quỹ phép (Chỉ áp dụng với NGHI_PHEP)
+    // 3. Kiểm tra quỹ phép. Việc trừ thực tế sẽ đi qua ledger để có thể hoàn đúng từng ngày/buổi.
     let quyPhep = (emp.quy_phep_nam !== null ? emp.quy_phep_nam : 12) + bonusLeave;
 
     if (loai_nghi === 'NGHI_PHEP') {
@@ -101,9 +116,6 @@ export async function POST(req: NextRequest) {
             const displayDays = sumDays < 1 ? '0.5' : String(sumDays);
             return NextResponse.json({ error: `Quỹ phép của nhân viên chỉ còn ${quyPhep} ngày, không đủ cho ${displayDays} ngày xin nghỉ.` }, { status: 400 });
         }
-        quyPhep = quyPhep - sumDays;
-        // Cập nhật số phép còn lại (làm tròn 1 chữ số thập phân cho sạch)
-        await admin.from('nhan_vien').update({ quy_phep_nam: Math.round(quyPhep * 10) / 10 }).eq('ma_nv', ma_nv);
     }
 
     const auditLog = [{
@@ -114,7 +126,7 @@ export async function POST(req: NextRequest) {
       after: { tu_ngay, den_ngay, loai_nghi, buoi_nghi: buoiNghiValue, sum_days: sumDays }
     }];
 
-    const { error } = await admin.from('don_nghi_phep').insert({
+    const { data: insertedLeave, error } = await admin.from('don_nghi_phep').insert({
         ma_nv,
         ho_ten: emp.ho_ten,
         tu_ngay,
@@ -124,13 +136,41 @@ export async function POST(req: NextRequest) {
         ly_do: `[TRUONG KHOA UPDATE] Tao boi ${manager_email}`,
         audit_log: auditLog,
         is_test: ma_nv.startsWith('NV_TEST_')
-    });
+    }).select('id, ma_nv, tu_ngay, den_ngay, buoi_nghi').single();
 
     if (error) throw error;
+
+    try {
+      if (loai_nghi === 'NGHI_PHEP') {
+        await createLeaveDebitTransactions({
+          admin,
+          leaveId: insertedLeave.id,
+          maNv: ma_nv,
+          tuNgay: tu_ngay,
+          denNgay: den_ngay,
+          buoiNghi: buoiNghiValue,
+          reason: `Tạo đơn nghỉ phép bởi ${manager_email}`,
+        });
+
+        quyPhep = quyPhep - sumDays;
+        const { error: quotaError } = await admin
+          .from('nhan_vien')
+          .update({ quy_phep_nam: Math.round(quyPhep * 10) / 10 })
+          .eq('ma_nv', ma_nv);
+
+        if (quotaError) throw new Error(`Không thể cập nhật quỹ phép: ${quotaError.message}`);
+      }
+    } catch (ledgerError) {
+      await admin.from('phep_quota_transactions').delete().eq('leave_id', insertedLeave.id);
+      await admin.from('don_nghi_phep').delete().eq('id', insertedLeave.id);
+      const message = ledgerError instanceof Error ? ledgerError.message : 'Không thể ghi ledger phép';
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
     
     return NextResponse.json({ success: true, message: 'Cập nhật thành công' });
-  } catch {
-    return NextResponse.json({ error: 'Lỗi hệ thống khi tải phép.' }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Lỗi hệ thống khi tải phép.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -160,6 +200,18 @@ export async function DELETE(req: NextRequest) {
 
     // Nếu lệnh nghỉ chưa bắt đầu (tu_ngay > today) -> Xóa luôn
     if (plan.tu_ngay > todayDateStr) {
+       if (plan.loai_nghi === 'NGHI_PHEP') {
+         await creditLeaveUnits({
+           admin,
+           leaveId: plan.id,
+           maNv: plan.ma_nv,
+           tuNgay: plan.tu_ngay,
+           denNgay: plan.den_ngay,
+           buoiNghi: plan.buoi_nghi,
+           source: LEAVE_TRANSACTION_SOURCES.managerCancel,
+           reason: `Hoàn phép do xóa lệnh nghỉ tương lai bởi ${manager_email}`,
+         });
+       }
        await admin.from('don_nghi_phep').delete().eq('id', id);
        return NextResponse.json({ success: true, message: 'Đã xóa lệnh nghỉ trong tương lai' });
     }
@@ -173,6 +225,20 @@ export async function DELETE(req: NextRequest) {
     auditEntry.after = { tu_ngay: plan.tu_ngay, den_ngay: todayDateStr };
     existingAudit.push(auditEntry);
 
+    const refundFrom = todayDateStr < plan.den_ngay ? addOneVNDay(todayDateStr) : null;
+    if (refundFrom && plan.loai_nghi === 'NGHI_PHEP') {
+      await creditLeaveUnits({
+        admin,
+        leaveId: plan.id,
+        maNv: plan.ma_nv,
+        tuNgay: refundFrom,
+        denNgay: plan.den_ngay,
+        buoiNghi: plan.buoi_nghi,
+        source: LEAVE_TRANSACTION_SOURCES.managerCancel,
+        reason: `Hoàn phép do hủy sớm bởi ${manager_email}`,
+      });
+    }
+
     await admin.from('don_nghi_phep').update({
        den_ngay: todayDateStr,
        audit_log: existingAudit as Json[],
@@ -180,7 +246,14 @@ export async function DELETE(req: NextRequest) {
     }).eq('id', id);
 
     return NextResponse.json({ success: true, message: 'Lệnh nghỉ sẽ hết hiệu lực từ ngày mai.' });
-  } catch {
-    return NextResponse.json({ error: 'Lỗi hệ thống khi hủy lệnh nghỉ.' }, { status: 500 });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Lỗi hệ thống khi hủy lệnh nghỉ.';
+    return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+function addOneVNDay(dateStr: string): string {
+  const date = new Date(`${dateStr}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().split('T')[0];
 }

@@ -17,8 +17,7 @@ import {
   ArrowRightLeft,
   Eye,
   EyeOff,
-  X,
-  AlertTriangle
+  X
 } from 'lucide-react';
 
 type Employee = Database['public']['Tables']['nhan_vien']['Row'];
@@ -601,12 +600,18 @@ type AutoCloseOpenInConfig = {
   updatedAt: string | null;
 };
 
+type AutoEmailReportConfig = {
+  enabled: boolean;
+  scheduleLabel: string;
+};
+
 const AUTO_CLOSE_CONFIG_KEYS = new Set([
   'AUTO_CLOSE_OPEN_IN_ENABLED',
   'AUTO_CLOSE_OPEN_IN_PENDING_VALUE',
   'AUTO_CLOSE_OPEN_IN_EFFECTIVE_DATE',
   'AUTO_CLOSE_OPEN_IN_UPDATED_BY',
   'AUTO_CLOSE_OPEN_IN_UPDATED_AT',
+  'AUTO_EMAIL_REPORT_ENABLED',
 ]);
 
 const SYSTEM_READONLY_CONFIG_KEYS = new Set([
@@ -643,6 +648,8 @@ function ConfigTab({ adminEmail }: { adminEmail: string }) {
   const [autoCloseConfig, setAutoCloseConfig] = useState<AutoCloseOpenInConfig | null>(null);
   const [autoCloseTarget, setAutoCloseTarget] = useState<boolean | null>(null);
   const [savingAutoClose, setSavingAutoClose] = useState(false);
+  const [autoEmailReportConfig, setAutoEmailReportConfig] = useState<AutoEmailReportConfig | null>(null);
+  const [savingAutoEmailReport, setSavingAutoEmailReport] = useState(false);
 
   const generateMasterOtp = async () => {
     if (!confirm('Bạn có chắc muốn sinh ra một mã OTP khẩn cấp dùng chung cho tất cả nhân viên? (Có hiệu lực 10 phút)')) return;
@@ -664,14 +671,17 @@ function ConfigTab({ adminEmail }: { adminEmail: string }) {
 
   const fetchConfigs = async () => {
     setLoading(true);
-    const [configRes, autoCloseRes] = await Promise.all([
+    const [configRes, autoCloseRes, autoEmailReportRes] = await Promise.all([
       fetch('/api/admin/data?type=configs'),
       fetch('/api/admin/auto-close-open-in'),
+      fetch('/api/admin/report-email'),
     ]);
     const data = await configRes.json();
     const autoCloseData = await autoCloseRes.json();
+    const autoEmailReportData = await autoEmailReportRes.json();
     setConfigs(Array.isArray(data) ? data as SystemConfig[] : []);
     if (autoCloseRes.ok) setAutoCloseConfig(autoCloseData as AutoCloseOpenInConfig);
+    if (autoEmailReportRes.ok) setAutoEmailReportConfig(autoEmailReportData as AutoEmailReportConfig);
     setLoading(false);
   };
 
@@ -716,9 +726,32 @@ function ConfigTab({ adminEmail }: { adminEmail: string }) {
     }
   };
 
+  const toggleAutoEmailReport = async () => {
+    const nextValue = !(autoEmailReportConfig?.enabled ?? false);
+    setSavingAutoEmailReport(true);
+    try {
+      const res = await fetch('/api/admin/report-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: nextValue }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || 'Lỗi khi cập nhật gửi báo cáo tự động.');
+      } else {
+        setAutoEmailReportConfig(data as AutoEmailReportConfig);
+        await fetchConfigs();
+      }
+    } catch {
+      alert('Lỗi kết nối.');
+    } finally {
+      setSavingAutoEmailReport(false);
+    }
+  };
+
   const effectiveDisplay = autoCloseConfig?.effectiveDate || getClientVNDatePlus(7);
   const activeAutoCloseValue = autoCloseConfig?.pendingValue ?? autoCloseConfig?.enabled ?? true;
-  const displayConfigs = configs.filter((cf) => cf.key !== 'AUTO_CLOSE_OPEN_IN_ENABLED');
+  const displayConfigs = configs.filter((cf) => !['AUTO_CLOSE_OPEN_IN_ENABLED', 'AUTO_EMAIL_REPORT_ENABLED', 'THANG_DA_XAC_NHAN'].includes(cf.key));
 
   return (
     <>
@@ -778,6 +811,30 @@ function ConfigTab({ adminEmail }: { adminEmail: string }) {
             }`}
           >
             {activeAutoCloseValue ? 'Lên lịch tắt' : 'Lên lịch bật'}
+          </button>
+        </section>
+
+        <section className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+          <div className="space-y-2">
+            <div className="flex items-center gap-3">
+              <span className={`h-3 w-3 rounded-full ${autoEmailReportConfig?.enabled ? 'bg-emerald-500' : 'bg-slate-400'}`} />
+              <h3 className="font-bold text-slate-800">Tự động gửi Excel khoa qua email</h3>
+            </div>
+            <p className="text-sm text-slate-500 max-w-2xl">
+              Trạng thái hiện tại: <b>{autoEmailReportConfig?.enabled ? 'Bật' : 'Tắt'}</b>. Email nhận lấy từ <b>dm_khoa_phong.email_truong_khoa</b>.
+            </p>
+            {autoEmailReportConfig?.scheduleLabel && (
+              <p className="text-xs text-slate-400">Lịch gửi khai báo trên server: {autoEmailReportConfig.scheduleLabel}</p>
+            )}
+          </div>
+          <button
+            onClick={() => void toggleAutoEmailReport()}
+            disabled={loading || savingAutoEmailReport}
+            className={`px-5 py-3 rounded-xl text-sm font-bold text-white shadow-sm transition ${
+              autoEmailReportConfig?.enabled ? 'bg-slate-700 hover:bg-slate-800' : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
+          >
+            {savingAutoEmailReport ? 'Đang lưu...' : autoEmailReportConfig?.enabled ? 'Tắt gửi tự động' : 'Bật gửi tự động'}
           </button>
         </section>
 
@@ -863,67 +920,6 @@ function ExportTab() {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
   });
-  const [confirmedMonth, setConfirmedMonth] = useState('');
-  const [loadingConfig, setLoadingConfig] = useState(true);
-  const [updating, setUpdating] = useState(false);
-
-  const fetchConfig = async () => {
-    try {
-      const res = await fetch('/api/admin/data?type=configs');
-      if (res.ok) {
-        const data = (await res.json()) as SystemConfig[];
-        const found = data.find((c) => c.key === 'THANG_DA_XAC_NHAN');
-        setConfirmedMonth(found?.value || '');
-      }
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoadingConfig(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchConfig();
-  }, []);
-
-  const handleConfirmMonth = async (targetMonth: string) => {
-    if (!window.confirm(`Xác nhận khóa dữ liệu tháng trước (${targetMonth})?\n\nSau khi khóa, tất cả các trang quản lý của Trưởng Khoa sẽ hiển thị cảnh báo màu đỏ yêu cầu KHÔNG ĐƯỢC CHỈNH SỬA cho đến khi có thông báo mới.`)) {
-      return;
-    }
-    setUpdating(true);
-    try {
-      const res = await fetch('/api/admin/data?type=configs', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ key: 'THANG_DA_XAC_NHAN', value: targetMonth }),
-      });
-      if (res.ok) {
-        setConfirmedMonth(targetMonth);
-        alert(`Đã khóa thành công dữ liệu tháng ${targetMonth}!`);
-      } else {
-        alert('Có lỗi xảy ra khi cập nhật cấu hình.');
-      }
-    } catch {
-      alert('Lỗi kết nối mạng.');
-    } finally {
-      setUpdating(false);
-    }
-  };
-
-  const { prevMonthStr, isConfirmed } = useMemo(() => {
-    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
-    const currYear = tzDate.getUTCFullYear();
-    const currMonth = tzDate.getUTCMonth() + 1;
-    
-    const currentMonthStr = `${currYear}-${String(currMonth).padStart(2, '0')}`;
-    
-    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
-    const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
-    
-    const isConfirmed = confirmedMonth === prevMonthStr || confirmedMonth === currentMonthStr;
-    
-    return { currentMonthStr, prevMonthStr, isConfirmed };
-  }, [confirmedMonth]);
 
   const downloadAll = () => {
     if (!month) return alert('Chọn tháng xuất báo cáo!');
@@ -936,44 +932,6 @@ function ExportTab() {
         <h2 className="text-2xl font-bold font-outfit text-slate-800">Trung Tâm Xuất Báo Cáo Excel</h2>
         <p className="text-sm text-slate-500 mt-1">Hệ thống tổng hợp chuẩn định dạng BCC, tự nhận diện vắt ca và tự bù ký hiệu phép.</p>
       </header>
-
-      {/* Monthly Lock status */}
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-4">
-        <h3 className="text-sm font-bold text-slate-600 uppercase tracking-wider">Trạng thái khóa đối soát công tháng trước ({prevMonthStr})</h3>
-        
-        {loadingConfig ? (
-          <div className="text-xs text-slate-400">Đang tải trạng thái cấu hình...</div>
-        ) : isConfirmed ? (
-          <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl flex items-start gap-3">
-            <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={20} />
-            <div>
-              <h4 className="font-bold text-emerald-800 text-sm">Đã khóa dữ liệu đối soát</h4>
-              <p className="text-xs text-emerald-700 mt-1 leading-relaxed">
-                Tháng đã xác nhận: <b>{confirmedMonth}</b>. 
-                Giao diện quản lý của các Trưởng Khoa hiện đang ở trạng thái bình thường hoặc hiển thị thông báo an toàn.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3">
-            <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={20} />
-            <div>
-              <h4 className="font-bold text-amber-800 text-sm">Chưa khóa dữ liệu tháng trước</h4>
-              <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                Admin chưa xác nhận hoàn thành đối soát tháng <b>{prevMonthStr}</b>. 
-                Các Trưởng Khoa hiện tại vẫn nhìn thấy cảnh báo yêu cầu <b>KHÔNG ĐƯỢC CHỈNH SỬA</b> để đảm bảo tính nhất quán dữ liệu trước khi chốt công.
-              </p>
-              <button
-                disabled={updating}
-                onClick={() => handleConfirmMonth(prevMonthStr)}
-                className="mt-3 px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-lg text-xs font-bold transition-all shadow-sm"
-              >
-                {updating ? 'Đang thực hiện...' : `Xác nhận & Khóa tháng ${prevMonthStr}`}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm space-y-6">
         <div>

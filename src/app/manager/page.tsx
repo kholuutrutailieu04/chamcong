@@ -243,50 +243,25 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
   const [loading, setLoading] = useState(true);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const { toastError, toastSuccess, toastWarning } = useToast();
-  const [confirmedMonth, setConfirmedMonth] = useState<string>('');
-  const [dismissedMonth, setDismissedMonth] = useState<string | null>(null);
 
   const isTest = session.is_test_account ?? false;
-
-  const { currentMonthStr, prevMonthStr, showLockWarning } = useMemo(() => {
-    // Lấy thời gian hiện tại theo GMT+7
-    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
-    const currYear = tzDate.getUTCFullYear();
-    const currMonth = tzDate.getUTCMonth() + 1;
-    
-    const currentMonthStr = `${currYear}-${String(currMonth).padStart(2, '0')}`;
-    
-    // Tính tháng trước
-    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
-    const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
-    
-    // Nếu tháng đã xác nhận khác tháng trước (và khác tháng này) và chưa chủ động xuất thì báo động
-    const showLockWarning = confirmedMonth !== prevMonthStr && confirmedMonth !== currentMonthStr && dismissedMonth !== prevMonthStr;
-    
-    return { currentMonthStr, prevMonthStr, showLockWarning };
-  }, [confirmedMonth, dismissedMonth]);
 
   const fetchAll = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
     try {
       const isTestParam = isTest ? '&is_test=true' : '&is_test=false';
-      const [resRotation, resEmployees, resCorrection, resStaffStatus, resSpecial, resConfig] = await Promise.all([
+      const [resRotation, resEmployees, resCorrection, resStaffStatus, resSpecial] = await Promise.all([
         fetch(`/api/manager/rotation/approve?khoa=${session.khoa}`),
         fetch(`/api/manager/employees?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/attendance-corrections?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/staff-status?khoa=${session.khoa}${isTestParam}`),
         fetch(`/api/manager/special-records?khoa=${session.khoa}${isTestParam}`),
-        fetch(`/api/manager/config`),
       ]);
       if (resRotation.ok) setRotations((await resRotation.json()) as RotationRequest[]);
       if (resEmployees.ok) setEmployees((await resEmployees.json()) as ManagerEmployee[]);
       if (resCorrection.ok) setCorrectionRecords((await resCorrection.json()) as ManagerCorrectionRecord[]);
       if (resStaffStatus.ok) setStaffStatusList((await resStaffStatus.json()) as StaffStatusRecord[]);
       if (resSpecial.ok) setSpecialRecords((await resSpecial.json()) as ManagerSpecialRecord[]);
-      if (resConfig.ok) {
-        const configData = await resConfig.json();
-        setConfirmedMonth(configData.value || '');
-      }
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -302,26 +277,6 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
       clearInterval(timer);
     };
   }, [fetchAll, onLogout, session.email]);
-
-  useEffect(() => {
-    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
-    const currYear = tzDate.getUTCFullYear();
-    const currMonth = tzDate.getUTCMonth() + 1;
-    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
-    const calculatedPrevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
-    
-    const key = `excel_exported_${session.khoa}_${calculatedPrevMonthStr}`;
-    if (localStorage.getItem(key) === 'true') {
-      setDismissedMonth(calculatedPrevMonthStr);
-    }
-  }, [session.khoa]);
-
-  const handleExport = (targetMonth: string) => {
-    window.open(`/api/export-excel?khoa=${session.khoa}&month=${targetMonth}`, '_blank');
-    const key = `excel_exported_${session.khoa}_${targetMonth}`;
-    localStorage.setItem(key, 'true');
-    setDismissedMonth(targetMonth);
-  };
 
   const approveRotation = async (requestId: string) => {
     if (!window.confirm('Bạn có chắc chắn muốn duyệt yêu cầu này?')) return;
@@ -367,14 +322,10 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
                 const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
                 window.open(`/api/export-excel?khoa=${session.khoa}&month=${month}`, '_blank');
               }}
-              className={`p-2 bg-white border rounded-lg shadow-sm hover:bg-slate-50 transition-colors ${
-                showLockWarning 
-                  ? 'animate-warning-pulse border-amber-500 bg-amber-50' 
-                  : 'border-glass-border'
-              }`}
-              title={showLockWarning ? "Cảnh báo: Tháng cũ chưa được xác nhận!" : "Xuất Excel tháng này"}
+              className="p-2 bg-white border border-glass-border rounded-lg shadow-sm hover:bg-slate-50 transition-colors"
+              title="Xuất Excel tháng này"
             >
-              <FileSpreadsheet size={20} className={showLockWarning ? 'text-amber-600' : 'text-emerald-600'} />
+              <FileSpreadsheet size={20} className="text-emerald-600" />
             </button>
           )}
           <button
@@ -438,28 +389,6 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
 
       {showChangePassword && (
         <ChangePasswordModal email={session.email} onClose={() => setShowChangePassword(false)} />
-      )}
-
-      {showLockWarning && (
-        <div className="fixed bottom-6 left-6 right-6 z-50 bg-amber-500/90 backdrop-blur-md text-white px-6 py-4 rounded-2xl shadow-2xl border border-amber-400/50 flex flex-col md:flex-row items-center justify-between gap-4 animate-slide-up">
-          <div className="flex items-center gap-3">
-            <div className="bg-white/20 p-2.5 rounded-xl animate-pulse shrink-0">
-              <AlertTriangle size={24} className="text-white" />
-            </div>
-            <div>
-              <h4 className="font-bold text-base font-outfit">Cảnh Báo: Đối Soát Công Tháng {prevMonthStr}</h4>
-              <p className="text-sm text-white/90 mt-0.5 leading-relaxed">
-                Hệ thống đã bước sang tháng mới ({currentMonthStr}). Vui lòng <b>KHÔNG CHỈNH SỬA</b> lịch sử ca trực và chấm công của tháng cũ {prevMonthStr} cho đến khi nhận được xác nhận từ Phòng TCCB!
-              </p>
-            </div>
-          </div>
-          <button 
-            onClick={() => handleExport(prevMonthStr)}
-            className="px-5 py-2.5 bg-white hover:bg-slate-50 text-amber-700 rounded-xl text-sm font-bold shadow-md transition-all whitespace-nowrap"
-          >
-            Xuất Excel Tháng {prevMonthStr}
-          </button>
-        </div>
       )}
     </div>
   );
