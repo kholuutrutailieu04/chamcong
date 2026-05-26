@@ -258,6 +258,9 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
   const [searchQuery, setSearchQuery] = useState('');
   const [filterKhoa, setFilterKhoa] = useState('ALL');
   const [filterPhep, setFilterPhep] = useState('ALL');
+  const khoaNameByCode = useMemo(() => {
+    return new Map(khoas.map((k) => [k.ma_khoa, k.ten_khoa || k.ma_khoa]));
+  }, [khoas]);
 
   // Modal State
   const [editingEmp, setEditingEmp] = useState<Employee | null>(null);
@@ -375,8 +378,12 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
   };
 
   const filteredEmployees = employees.filter(emp => {
+    const khoaName = khoaNameByCode.get(emp.khoa_phong) ?? emp.khoa_phong;
+    const normalizedSearch = searchQuery.toLowerCase();
     const matchSearch = emp.ma_nv?.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                        emp.ho_ten?.toLowerCase().includes(searchQuery.toLowerCase());
+                        emp.ho_ten?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        khoaName.toLowerCase().includes(normalizedSearch) ||
+                        emp.khoa_phong.toLowerCase().includes(normalizedSearch);
     const matchKhoa = filterKhoa === 'ALL' || emp.khoa_phong === filterKhoa;
     
     let matchPhep = true;
@@ -425,7 +432,7 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
           className="p-2 border border-slate-300 rounded-lg outline-none focus:border-primary text-sm max-w-xs"
         >
           <option value="ALL">-- Tất cả Khoa --</option>
-          {khoas.map(k => <option key={k.ma_khoa} value={k.ten_khoa}>{k.ten_khoa}</option>)}
+          {khoas.map(k => <option key={k.ma_khoa} value={k.ma_khoa}>{k.ten_khoa}</option>)}
         </select>
         <select 
           value={filterPhep} 
@@ -464,7 +471,7 @@ function EmployeeTab({ adminEmail, onNavigateToRotation, snapCheckQueue, onToggl
                     <div className="font-medium">{emp.so_dien_thoai || '---'}</div>
                     <div className="text-xs text-slate-500">{emp.email || '---'}</div>
                   </td>
-                  <td className="px-4 py-3 text-sm">{emp.khoa_phong}</td>
+                  <td className="px-4 py-3 text-sm">{khoaNameByCode.get(emp.khoa_phong) ?? emp.khoa_phong}</td>
                   <td className="px-4 py-3">
                     <span className="px-2 py-1 bg-emerald-50 text-emerald-700 font-bold rounded text-xs border border-emerald-100">
                       Tổng: {calculateTotalLeave(emp.ngay_vao_lam, 12)} | Còn: {emp.quy_phep_nam}
@@ -864,12 +871,12 @@ function ExportTab() {
     try {
       const res = await fetch('/api/admin/data?type=configs');
       if (res.ok) {
-        const data = await res.json();
-        const found = data.find((c: any) => c.key === 'THANG_DA_XAC_NHAN');
+        const data = (await res.json()) as SystemConfig[];
+        const found = data.find((c) => c.key === 'THANG_DA_XAC_NHAN');
         setConfirmedMonth(found?.value || '');
       }
-    } catch (e) {
-      console.error(e);
+    } catch (error) {
+      console.error(error);
     } finally {
       setLoadingConfig(false);
     }
@@ -896,14 +903,14 @@ function ExportTab() {
       } else {
         alert('Có lỗi xảy ra khi cập nhật cấu hình.');
       }
-    } catch (e) {
+    } catch {
       alert('Lỗi kết nối mạng.');
     } finally {
       setUpdating(false);
     }
   };
 
-  const { currentMonthStr, prevMonthStr, isConfirmed } = useMemo(() => {
+  const { prevMonthStr, isConfirmed } = useMemo(() => {
     const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
     const currYear = tzDate.getUTCFullYear();
     const currMonth = tzDate.getUTCMonth() + 1;
@@ -1269,6 +1276,7 @@ function RotationTab({ initialTargetEmp }: RotationTabProps) {
   const [khoas, setKhoas] = useState<KhoaOption[]>([]);
   const [coSos, setCoSos] = useState<CoSoOption[]>([]);
   const [loading, setLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [preview, setPreview] = useState<RotationPreview | null>(null); // Dữ liệu tab xác nhận
   const [step, setStep] = useState<'form' | 'preview' | 'done'>('form');
   const [history, setHistory] = useState<RotationHistory[]>([]);
@@ -1304,7 +1312,7 @@ function RotationTab({ initialTargetEmp }: RotationTabProps) {
     try {
       const res = await fetch('/api/admin/rotation', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, preview_only: true })
       });
       const data = (await res.json()) as { preview?: RotationPreview; error?: string };
       if (res.ok) {
@@ -1315,6 +1323,27 @@ function RotationTab({ initialTargetEmp }: RotationTabProps) {
       }
     } catch { alert('Lỗi kết nối.'); }
     setLoading(false);
+  };
+
+  const handleConfirmSubmit = async () => {
+    setSubmitting(true);
+    try {
+      const res = await fetch('/api/admin/rotation', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(form)
+      });
+      const data = (await res.json()) as { error?: string };
+      if (res.ok) {
+        setStep('done');
+        fetch('/api/admin/rotation?type=LUAN_CHUYEN&limit=20')
+          .then(r => r.json())
+          .then(data => { if (Array.isArray(data)) setHistory(data as RotationHistory[]); })
+          .catch(() => {});
+      } else {
+        alert(`Lỗi: ${data.error}`);
+      }
+    } catch { alert('Lỗi kết nối.'); }
+    setSubmitting(false);
   };
 
   const loaiTrucLabel: Record<string, string> = {
@@ -1350,12 +1379,18 @@ function RotationTab({ initialTargetEmp }: RotationTabProps) {
           <p className="font-bold">{preview.canh_bao_loai_truc ? '⚠️ Tự động điều chỉnh loại trực' : '✅ Loại trực giữ nguyên'}</p>
           <p className="text-xs mt-1">
             {loaiTrucLabel[preview.loai_truc_cu]} → <b>{loaiTrucLabel[preview.loai_truc_moi]}</b>
-            {preview.canh_bao_loai_truc && ' (Khoa đến không hỗ trợ loại trực cũ, hệ thống tự chuyển về Hành Chính)'}
+            {preview.canh_bao_loai_truc && ' (Khoa đến không hỗ trợ loại trực cũ, hệ thống tự chuyển về loại phù hợp mặc định của khoa đến)'}
           </p>
         </div>
         <div className="flex gap-3 pt-2">
           <button onClick={() => setStep('form')} className="flex-1 py-3 border border-slate-300 rounded-lg font-bold text-slate-600 hover:bg-slate-50">← Quay lại sửa</button>
-          <button onClick={() => setStep('done')} className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition">Xác nhận gửi lệnh ✓</button>
+          <button
+            disabled={submitting}
+            onClick={() => void handleConfirmSubmit()}
+            className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold transition disabled:opacity-60"
+          >
+            {submitting ? 'Đang gửi...' : 'Xác nhận gửi lệnh ✓'}
+          </button>
         </div>
       </div>
     </div>

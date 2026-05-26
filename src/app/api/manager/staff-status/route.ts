@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { getTodayVN, getVNDayRangeUTC } from '@/lib/timezone';
 import { requireManager } from '@/lib/auth';
@@ -19,11 +19,7 @@ type LeavePlanStatus = {
   den_ngay: string;
 };
 
-function escapeLike(value: string): string {
-  return value.replace(/[%_]/g, (m) => `\\${m}`);
-}
-
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireManager();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
 
@@ -106,22 +102,38 @@ export async function GET(req: NextRequest) {
 
   const restSet = new Set(restLeaves?.map(r => r.ma_nv) || []);
 
+  const { data: firstDayMarkers } = await admin
+    .from('first_day_ra_truc_markers')
+    .select('ma_nv, ngay_ap_dung')
+    .in('ma_nv', empIds);
+
+  const usedFirstDayRaTrucSet = new Set(firstDayMarkers?.map((marker) => marker.ma_nv) || []);
+  const todayFirstDayRaTrucSet = new Set(
+    (firstDayMarkers ?? [])
+      .filter((marker) => marker.ngay_ap_dung === todayDateStr)
+      .map((marker) => marker.ma_nv),
+  );
+
   // 5. Combine using "Actual overrides Plan"
   const staffStatus = employees.map(emp => {
     const actual = actualMap.get(emp.ma_nv);
     const plan = planMap.get(emp.ma_nv);
     const isResting = restSet.has(emp.ma_nv);
+    const isFirstDayRaTrucToday = todayFirstDayRaTrucSet.has(emp.ma_nv);
+    const hasPlan = !!plan || isResting || isFirstDayRaTrucToday;
 
     return {
       ...emp,
       status: {
         has_actual: !!actual,
         actual_data: actual || null,
-        has_plan: !!plan || isResting,
+        has_plan: hasPlan,
         plan_data: plan || null,
-        display_state: actual ? 'ACTUAL' : ((plan || isResting) ? 'PLAN' : 'NONE'),
-        display_type: actual ? actual.loai_ca : (plan ? plan.loai_nghi : (isResting ? 'NGHI_BU' : null)),
-        is_resting: isResting
+        display_state: actual ? 'ACTUAL' : (hasPlan ? 'PLAN' : 'NONE'),
+        display_type: actual ? actual.loai_ca : (plan ? plan.loai_nghi : ((isResting || isFirstDayRaTrucToday) ? 'NGHI_BU' : null)),
+        is_resting: isResting,
+        is_first_day_ra_truc: isFirstDayRaTrucToday,
+        has_used_first_day_ra_truc: usedFirstDayRaTrucSet.has(emp.ma_nv),
       }
     };
   });

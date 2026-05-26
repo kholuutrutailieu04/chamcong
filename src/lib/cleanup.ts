@@ -77,6 +77,7 @@ export async function cleanupSandboxData(admin: SupabaseClient<Database>) {
       'yeu_cau_quan_tri',
       'lich_luan_chuyen',
       'don_nghi_phep',
+      'first_day_ra_truc_markers',
       'log_gian_lan',
     ] as const;
 
@@ -152,7 +153,7 @@ export async function archivePreviousMonthAttendance(admin: SupabaseClient<Datab
     }));
 
     const { error: insertErr } = await admin
-      .from('lich_su_cham_cong_archive' as any)
+      .from('lich_su_cham_cong_archive')
       .insert(archiveData);
 
     if (insertErr) throw insertErr;
@@ -171,9 +172,8 @@ export async function archivePreviousMonthAttendance(admin: SupabaseClient<Datab
       message: `Đã lưu trữ thành công ${oldRecords.length} bản ghi tháng cũ.`, 
       archived_count: oldRecords.length 
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Archive Previous Month Attendance Error:', error);
-    return { success: false, error: error.message || error, archived_count: 0 };
+    return { success: false, error: error instanceof Error ? error.message : error, archived_count: 0 };
   }
 }
-

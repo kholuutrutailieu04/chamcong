@@ -3,6 +3,33 @@ import { getAdminClient } from '@/lib/supabase';
 import { is3CaShiftType, normalizeShiftType } from '@/lib/shift';
 import { requireAdmin } from '@/lib/auth';
 
+type RotationKhoaInfo = {
+  cho_phep_12_24: boolean | null;
+  cho_phep_16_24: boolean | null;
+  cho_phep_24_24: boolean | null;
+  cho_phep_3ca4kip: boolean | null;
+  cho_phep_hanh_chinh: boolean | null;
+};
+
+function isShiftAllowedForKhoa(shiftType: string, khoa: RotationKhoaInfo) {
+  return (
+    (shiftType === 'TRUC_12_24' && !!khoa.cho_phep_12_24) ||
+    (shiftType === 'TRUC_16_24' && !!khoa.cho_phep_16_24) ||
+    (shiftType === 'TRUC_24_24' && !!khoa.cho_phep_24_24) ||
+    (is3CaShiftType(shiftType) && !!khoa.cho_phep_3ca4kip) ||
+    (shiftType === 'HANH_CHINH' && !!khoa.cho_phep_hanh_chinh)
+  );
+}
+
+function pickFallbackShiftForKhoa(khoa: RotationKhoaInfo) {
+  if (khoa.cho_phep_hanh_chinh) return 'HANH_CHINH';
+  if (khoa.cho_phep_24_24) return 'TRUC_24_24';
+  if (khoa.cho_phep_16_24) return 'TRUC_16_24';
+  if (khoa.cho_phep_12_24) return 'TRUC_12_24';
+  if (khoa.cho_phep_3ca4kip) return '3CA_4KIP';
+  return 'HANH_CHINH';
+}
+
 export async function GET(req: NextRequest) {
   const session = await requireAdmin();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
@@ -59,13 +86,9 @@ export async function POST(req: NextRequest) {
     let loaiTrucCanhBao = false;
     let loaiTrucMoi = loaiTrucCu;
     if (khoaDich) {
-      const isIncompatible =
-        (loaiTrucCu === 'TRUC_12_24'   && !khoaDich.cho_phep_12_24)  ||
-        (loaiTrucCu === 'TRUC_16_24'   && !khoaDich.cho_phep_16_24)  ||
-        (loaiTrucCu === 'TRUC_24_24'   && !khoaDich.cho_phep_24_24)  ||
-        (is3CaShiftType(loaiTrucCu) && !khoaDich.cho_phep_3ca4kip);
+      const isIncompatible = !isShiftAllowedForKhoa(loaiTrucCu, khoaDich);
       if (isIncompatible) {
-        loaiTrucMoi = 'HANH_CHINH';
+        loaiTrucMoi = pickFallbackShiftForKhoa(khoaDich);
         loaiTrucCanhBao = true;
       }
     }
@@ -94,8 +117,26 @@ export async function POST(req: NextRequest) {
     const noi_dung_nguon = `Nhân sự ${emp.ho_ten} (${ma_nv}) được yêu cầu luân chuyển ĐI từ [${tenKhoaNguon} - ${coSoNguon}] sang [${tenKhoaDich} - ${coSoDich}], từ ngày ${tuNgayFormatted} đến ${denNgayFormatted}. Vui lòng xác nhận.`;
     const noi_dung_dich  = `Nhân sự ${emp.ho_ten} (${ma_nv}) được phân công ĐẾN khoa bạn từ [${tenKhoaNguon} - ${coSoNguon}], từ ngày ${tuNgayFormatted} đến ${denNgayFormatted}. Vui lòng xác nhận để bắt đầu chấm công.`;
 
-    // 6. Tạo yêu cầu
-    const { data, error } = await admin.from('yeu_cau_quan_tri').insert({
+    const preview = {
+      ho_ten: emp.ho_ten,
+      ma_nv,
+      khoa_nguon: tenKhoaNguon, co_so_nguon: coSoNguon,
+      khoa_dich:  tenKhoaDich,  co_so_dich:  coSoDich,
+      tu_ngay, den_ngay: den_ngay || 'Vô thời hạn',
+      loai_truc_cu: loaiTrucCu,
+      loai_truc_moi: loaiTrucMoi,
+      canh_bao_loai_truc: loaiTrucCanhBao
+    };
+
+    if (body.preview_only) {
+      return NextResponse.json({
+        success: true,
+        message: 'Đã kiểm tra thông tin luân chuyển.',
+        preview,
+      });
+    }
+
+    const requestPayload = {
       loai_yeu_cau: 'LUAN_CHUYEN',
       ma_nv,
       ho_ten: emp.ho_ten,
@@ -109,25 +150,45 @@ export async function POST(req: NextRequest) {
       noi_dung_dich,
       trang_thai: 'PENDING',
       is_test: ma_nv.startsWith('NV_TEST_')
-    }).select('id').single();
+    };
+
+    const { data: pendingRequest, error: pendingError } = await admin
+      .from('yeu_cau_quan_tri')
+      .select('id')
+      .eq('loai_yeu_cau', 'LUAN_CHUYEN')
+      .eq('ma_nv', ma_nv)
+      .eq('trang_thai', 'PENDING')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pendingError) throw pendingError;
+
+    const writeResult = pendingRequest
+      ? await admin
+          .from('yeu_cau_quan_tri')
+          .update(requestPayload)
+          .eq('id', pendingRequest.id)
+          .select('id')
+          .single()
+      : await admin
+          .from('yeu_cau_quan_tri')
+          .insert(requestPayload)
+          .select('id')
+          .single();
+
+    const { data, error } = writeResult;
 
     if (error) throw error;
 
     // Trả về đầy đủ thông tin preview để UI hiển thị "Tab xác nhận"
     return NextResponse.json({
       success: true,
-      message: 'Đã gửi yêu cầu xác nhận tới các Khoa.',
+      message: pendingRequest
+        ? 'Đã cập nhật yêu cầu đang chờ xác nhận.'
+        : 'Đã gửi yêu cầu xác nhận tới các Khoa.',
       id: data.id,
-      preview: {
-        ho_ten: emp.ho_ten,
-        ma_nv,
-        khoa_nguon: tenKhoaNguon, co_so_nguon: coSoNguon,
-        khoa_dich:  tenKhoaDich,  co_so_dich:  coSoDich,
-        tu_ngay, den_ngay: den_ngay || 'Vô thời hạn',
-        loai_truc_cu: loaiTrucCu,
-        loai_truc_moi: loaiTrucMoi,
-        canh_bao_loai_truc: loaiTrucCanhBao
-      }
+      preview
     });
   } catch {
     return NextResponse.json({ error: 'Lỗi hệ thống' }, { status: 500 });

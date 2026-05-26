@@ -3,7 +3,7 @@ import { getAdminClient } from '@/lib/supabase';
 import { requireManager } from '@/lib/auth';
 
 // Lấy danh sách nhân viên chưa Checkout trong 48h tại khoa
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireManager();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
 

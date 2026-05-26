@@ -21,6 +21,7 @@ export default function RandomCheckPage({ params }: { params: Promise<{ token: s
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [gps, setGps] = useState<{lat: number, lon: number} | null>(null);
 
@@ -34,13 +35,33 @@ export default function RandomCheckPage({ params }: { params: Promise<{ token: s
       });
   }, [token]);
 
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
+
+  useEffect(() => {
+    if (step !== 'capture' || !videoRef.current || !streamRef.current || capturedImage) return;
+    videoRef.current.srcObject = streamRef.current;
+  }, [capturedImage, step]);
+
+  const requestGps = () => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      () => toastError('Không thể lấy vị trí GPS. Vui lòng bật định vị.'),
+      { enableHighAccuracy: true }
+    );
+  };
+
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setStep('capture');
-      }
+      streamRef.current = stream;
+      setCapturedImage(null);
+      setGps(null);
+      setStep('capture');
+      requestGps();
     } catch {
       toastError('Không thể mở camera. Vui lòng cấp quyền.');
     }
@@ -60,13 +81,9 @@ export default function RandomCheckPage({ params }: { params: Promise<{ token: s
       // Stop camera
       const stream = video.srcObject as MediaStream;
       stream.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
       
-      // Get GPS
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-        () => toastError('Không thể lấy vị trí GPS. Vui lòng bật định vị.'),
-        { enableHighAccuracy: true }
-      );
+      if (!gps) requestGps();
     }
   };
 

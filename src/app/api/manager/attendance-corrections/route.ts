@@ -43,7 +43,7 @@ function getVNDateBoundaries() {
   };
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireManager();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
 

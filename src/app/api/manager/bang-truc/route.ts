@@ -3,10 +3,6 @@ import { getAdminClient } from '@/lib/supabase';
 import { normalizeShiftType } from '@/lib/shift';
 import { requireManager } from '@/lib/auth';
 
-function escapeLike(value: string): string {
-  return value.replace(/[%_]/g, (m) => `\\${m}`);
-}
-
 export async function GET(req: NextRequest) {
   const session = await requireManager();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });

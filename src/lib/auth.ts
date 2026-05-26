@@ -1,4 +1,4 @@
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import { cookies } from 'next/headers';
 
 const secretKey = process.env.JWT_SECRET;
@@ -7,7 +7,7 @@ if (!secretKey) {
 }
 const key = new TextEncoder().encode(secretKey || 'default_secret_key_for_development');
 
-export async function signToken(payload: any, expiresIn: string | number | Date = '8h') {
+export async function signToken(payload: JWTPayload, expiresIn: string | number | Date = '8h') {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
@@ -21,7 +21,7 @@ export async function verifyToken(token: string) {
       algorithms: ['HS256'],
     });
     return payload;
-  } catch (error) {
+  } catch {
     return null;
   }
 }

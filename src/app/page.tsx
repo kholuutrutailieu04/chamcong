@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import Image from 'next/image';
 import { QrCode, ShieldCheck, MapPin, Zap, Users } from 'lucide-react';
 import type { ReactNode } from 'react';
 
@@ -12,7 +13,7 @@ export default function Home() {
       <div className="relative z-10 max-w-6xl mx-auto px-6 py-20 flex flex-col items-center text-center">
         <div className="animate-fade-in flex flex-col items-center">
           <div className="mb-8 flex items-center justify-center">
-            <img src="/logo.png" width={120} height={120} alt="Logo" className="drop-shadow-xl" />
+            <Image src="/logo.png" width={120} height={120} alt="Logo" className="drop-shadow-xl" priority />
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold font-outfit tracking-tight mb-6">

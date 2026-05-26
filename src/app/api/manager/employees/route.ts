@@ -2,14 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { requireManager } from '@/lib/auth';
 
-function escapeLike(value: string): string {
-  return value.replace(/[%_]/g, (m) => `\\${m}`);
-}
-
 /**
  * GET /api/manager/employees?khoa=KSS&is_test=false
  */
-export async function GET(req: NextRequest) {
+export async function GET() {
   const session = await requireManager();
   if (!session) return NextResponse.json({ error: 'Không có quyền truy cập.' }, { status: 401 });
 
@@ -103,4 +99,3 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Lỗi máy chủ.' }, { status: 500 });
   }
 }
-

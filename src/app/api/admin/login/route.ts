@@ -106,7 +106,7 @@ export async function POST(req: NextRequest) {
     });
 
     return NextResponse.json({ success: true });
-  } catch (err: unknown) {
+  } catch {
     return NextResponse.json({ error: 'Lỗi server' }, { status: 500 });
   }
 }

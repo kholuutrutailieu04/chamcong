@@ -66,6 +66,8 @@ type StaffStatusRecord = Pick<
     display_state: 'ACTUAL' | 'PLAN' | 'NONE';
     display_type: string | null;
     is_resting?: boolean;
+    is_first_day_ra_truc?: boolean;
+    has_used_first_day_ra_truc?: boolean;
   };
 };
 type ManagerSpecialRecord = {
@@ -1128,6 +1130,29 @@ function StaffSupportSection({
     }
   };
 
+  const handleFirstDayRaTruc = async (emp: StaffStatusRecord) => {
+    const reason = window.prompt(`Ghi nhận ra trực ngày đầu cho ${emp.ho_ten}?\nLý do/xác nhận:`);
+    if (!reason?.trim()) return;
+
+    const res = await fetch('/api/manager/first-day-ra-truc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ma_nv: emp.ma_nv,
+        reason: reason.trim(),
+        is_test: isTest,
+      }),
+    });
+
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      toastError(data.error || 'Lỗi ghi nhận ra trực');
+    } else {
+      toastSuccess('Đã ghi nhận ra trực ngày đầu. Bảng công sẽ hiển thị NB.');
+      onRefresh();
+    }
+  };
+
   return (
     <section className="glass rounded-xl p-6 shadow-sm border border-amber-200">
       <h2 className="text-xl font-bold mb-3 flex items-center gap-2 text-amber-700">
@@ -1177,7 +1202,7 @@ function StaffSupportSection({
                   </td>
                   <td className="p-3">
                     {st.display_state === 'ACTUAL' && <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold border border-emerald-200">{st.display_type} (Thực tế)</span>}
-                    {st.display_state === 'PLAN' && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold border border-amber-200">{st.display_type} {st.is_resting ? '(Nghỉ bù sau trực)' : '(Kế hoạch)'}</span>}
+                    {st.display_state === 'PLAN' && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold border border-amber-200">{st.display_type} {st.is_first_day_ra_truc ? '(Ra trực ngày đầu)' : (st.is_resting ? '(Nghỉ bù sau trực)' : '(Kế hoạch)')}</span>}
                     {st.display_state === 'NONE' && <span className="text-slate-400 text-xs">Chưa có dữ liệu</span>}
                   </td>
                   <td className="p-3 flex gap-2 flex-wrap items-center">
@@ -1185,6 +1210,9 @@ function StaffSupportSection({
                       <>
                         <button onClick={() => void handleQuickCheckin(emp, 'IN_LAM')} className="bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-1.5 rounded-lg text-xs font-bold transition">HC (+)</button>
                         <button onClick={() => void handleQuickCheckin(emp, 'IN_TRUC')} className="bg-purple-100 hover:bg-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold transition">Trực (TR)</button>
+                        {!st.has_used_first_day_ra_truc && (
+                          <button onClick={() => void handleFirstDayRaTruc(emp)} className="bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1.5 rounded-lg text-xs font-bold transition">Ra trực (NB)</button>
+                        )}
                         <button onClick={() => { setSelectedEmp(emp); setLeaveModalOpen(true); }} className="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold transition">Nghỉ/Chế độ</button>
                       </>
                     )}

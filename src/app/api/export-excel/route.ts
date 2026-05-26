@@ -7,10 +7,6 @@ import { getVNMonthRangeUTC, toVNDateString } from '@/lib/timezone';
 import path from 'path';
 import fs from 'fs';
 
-function escapeLike(value: string): string {
-  return value.replace(/[%_]/g, (m) => `\\${m}`);
-}
-
 function normalizeHeaderMonth(input: string, month: number, year: number): string {
   return input
     .replace(/tháng\s+\d+(?:[./-]\d{4})?/i, `Tháng ${month}.${year}`)
@@ -54,6 +50,10 @@ export async function GET(req: NextRequest) {
   const admin = getAdminClient();
 
   try {
+    const { data: khoaRows } = await admin
+      .from('dm_khoa_phong')
+      .select('ma_khoa, ten_khoa');
+    const khoaNameByCode = new Map((khoaRows ?? []).map((k) => [k.ma_khoa, k.ten_khoa || k.ma_khoa]));
     let tenKhoaExport: string | null = null;
     let empQuery = admin
       .from('nhan_vien')
@@ -62,13 +62,7 @@ export async function GET(req: NextRequest) {
       .not('trang_thai', 'is', false);
 
     if (khoa !== 'ALL') {
-      const { data: dmKhoa } = await admin
-        .from('dm_khoa_phong')
-        .select('ten_khoa')
-        .eq('ma_khoa', khoa)
-        .single();
-
-      tenKhoaExport = (dmKhoa?.ten_khoa || khoa).trim();
+      tenKhoaExport = (khoaNameByCode.get(khoa) || khoa).trim();
       empQuery = empQuery.eq('khoa_phong', khoa);
     }
 
@@ -227,7 +221,7 @@ export async function GET(req: NextRequest) {
 
       if (khoa === 'ALL') {
         sheet.getCell(`B${currentRow}`).value = emp.ma_nv ?? '';
-        sheet.getCell(`C${currentRow}`).value = emp.khoa_phong ?? '';
+        sheet.getCell(`C${currentRow}`).value = emp.khoa_phong ? (khoaNameByCode.get(emp.khoa_phong) ?? emp.khoa_phong) : '';
         sheet.getCell(`D${currentRow}`).value = emp.ho_ten ?? '';
         sheet.getCell(`D${currentRow}`).alignment = { horizontal: 'left', vertical: 'middle' };
       } else {

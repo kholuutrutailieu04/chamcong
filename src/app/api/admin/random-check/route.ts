@@ -23,6 +23,10 @@ export async function POST(req: NextRequest) {
 
     const results: Database['public']['Tables']['kiem_tra_dot_xuat']['Row'][] = [];
     const today = getTodayVN();
+    const { data: khoaRows } = await admin
+      .from('dm_khoa_phong')
+      .select('ma_khoa, ten_khoa');
+    const khoaNameByCode = new Map((khoaRows ?? []).map((k) => [k.ma_khoa, k.ten_khoa || k.ma_khoa]));
 
     for (const ma_nv of employeeIds) {
       // 1. Tra cứu thông tin NV
@@ -45,7 +49,8 @@ export async function POST(req: NextRequest) {
         .limit(1)
         .single();
 
-      const khoa_hien_tai = rotation?.khoa_den || emp.khoa_phong;
+      const khoa_hien_tai_code = rotation?.khoa_den || emp.khoa_phong;
+      const khoa_hien_tai = khoaNameByCode.get(khoa_hien_tai_code) || khoa_hien_tai_code;
       const co_so_hien_tai = rotation?.ma_co_so_dich || emp.ma_co_so_mac_dinh || 'CS1';
       const loai_truc = normalizeShiftType(rotation?.loai_truc_moi || emp.loai_truc_mac_dinh);
 

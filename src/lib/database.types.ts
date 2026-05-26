@@ -509,6 +509,67 @@ export interface Database {
           },
         ]
       }
+      first_day_ra_truc_markers: {
+        Row: {
+          id: string
+          ma_nv: string
+          ho_ten: string | null
+          ma_khoa: string
+          ngay_ap_dung: string
+          attendance_record_id: string | null
+          ghi_chu: string | null
+          created_by: string
+          created_at: string
+          is_test: boolean
+        }
+        Insert: {
+          id?: string
+          ma_nv: string
+          ho_ten?: string | null
+          ma_khoa: string
+          ngay_ap_dung: string
+          attendance_record_id?: string | null
+          ghi_chu?: string | null
+          created_by: string
+          created_at?: string
+          is_test?: boolean
+        }
+        Update: {
+          id?: string
+          ma_nv?: string
+          ho_ten?: string | null
+          ma_khoa?: string
+          ngay_ap_dung?: string
+          attendance_record_id?: string | null
+          ghi_chu?: string | null
+          created_by?: string
+          created_at?: string
+          is_test?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "first_day_ra_truc_markers_attendance_record_id_fkey"
+            columns: ["attendance_record_id"]
+            isOneToOne: false
+            referencedRelation: "lich_su_cham_cong"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "first_day_ra_truc_markers_ma_khoa_fkey"
+            columns: ["ma_khoa"]
+            isOneToOne: false
+            referencedRelation: "dm_khoa_phong"
+            referencedColumns: ["ma_khoa"]
+          },
+          {
+            foreignKeyName: "first_day_ra_truc_markers_ma_nv_fkey"
+            columns: ["ma_nv"]
+            isOneToOne: true
+            referencedRelation: "nhan_vien"
+            referencedColumns: ["ma_nv"]
+          },
+        ]
+      }
       lich_su_cham_cong: {
         Row: {
           id: string
@@ -571,6 +632,54 @@ export interface Database {
             referencedColumns: ["ma_nv"]
           },
         ]
+      }
+      lich_su_cham_cong_archive: {
+        Row: {
+          id: string
+          thoi_gian: string | null
+          ma_nv: string | null
+          ho_ten: string | null
+          khoa_ghi_nhan: string | null
+          loai_ca: string | null
+          link_anh_minh_chung: string | null
+          ghi_chu: string | null
+          ma_co_so: string | null
+          is_suspicious: boolean | null
+          in_record_id: string | null
+          is_test: boolean | null
+          ho_tro_boi: string | null
+        }
+        Insert: {
+          id?: string
+          thoi_gian?: string | null
+          ma_nv?: string | null
+          ho_ten?: string | null
+          khoa_ghi_nhan?: string | null
+          loai_ca?: string | null
+          link_anh_minh_chung?: string | null
+          ghi_chu?: string | null
+          ma_co_so?: string | null
+          is_suspicious?: boolean | null
+          in_record_id?: string | null
+          is_test?: boolean | null
+          ho_tro_boi?: string | null
+        }
+        Update: {
+          id?: string
+          thoi_gian?: string | null
+          ma_nv?: string | null
+          ho_ten?: string | null
+          khoa_ghi_nhan?: string | null
+          loai_ca?: string | null
+          link_anh_minh_chung?: string | null
+          ghi_chu?: string | null
+          ma_co_so?: string | null
+          is_suspicious?: boolean | null
+          in_record_id?: string | null
+          is_test?: boolean | null
+          ho_tro_boi?: string | null
+        }
+        Relationships: []
       }
       lich_su_sua_nham_cham_cong: {
         Row: {
@@ -739,6 +848,13 @@ export interface Database {
           cho_phep_di_chuyen_tu_do?: boolean | null
         }
         Relationships: [
+          {
+            foreignKeyName: "nhan_vien_khoa_phong_fkey"
+            columns: ["khoa_phong"]
+            isOneToOne: false
+            referencedRelation: "dm_khoa_phong"
+            referencedColumns: ["ma_khoa"]
+          },
           {
             foreignKeyName: "fk_nhanvien_cautruc"
             columns: ["loai_truc_mac_dinh"]
