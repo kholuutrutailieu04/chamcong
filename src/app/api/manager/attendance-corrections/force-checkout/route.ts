@@ -8,6 +8,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { calculateAndRecordRest } from '@/lib/rest-logic';
 import { requireManager } from '@/lib/auth';
+import { toVNDateString, addDaysToVNDate, getVNDateTimeUTC } from '@/lib/timezone';
 
 export async function POST(req: NextRequest) {
   const session = await requireManager();
@@ -67,14 +68,54 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Nhân viên này đã có check-out rồi.' }, { status: 409 });
     }
 
-    const nowIso = new Date().toISOString();
+    // Resolve shift code
+    let shiftCode = 'HANH_CHINH';
+    if (inRecord.loai_ca === 'IN_TRUC' && inRecord.ma_nv) {
+       const { data: emp } = await admin.from('nhan_vien').select('loai_truc_mac_dinh').eq('ma_nv', inRecord.ma_nv).single();
+       shiftCode = emp?.loai_truc_mac_dinh || 'HANH_CHINH';
+       
+       if (inRecord.ghi_chu?.includes('ca 3 kíp:')) {
+          const match = inRecord.ghi_chu.match(/ca 3 kíp: (\w+)/);
+          if (match && match[1]) shiftCode = match[1];
+       }
+    }
+
+    // Fetch shift config to get end time and if it crosses midnight
+    const { data: shiftConfig } = await admin
+      .from('cau_hinh_ca_truc')
+      .select('gio_bat_dau, gio_ket_thuc, vat_qua_nua_dem')
+      .eq('ma_ca', shiftCode)
+      .maybeSingle();
+
+    if (!inRecord.thoi_gian) {
+      return NextResponse.json({ error: 'Bản ghi check-in thiếu thông tin thời gian.' }, { status: 400 });
+    }
+
+    const checkinVNDate = toVNDateString(new Date(inRecord.thoi_gian));
+    let endVNDate = checkinVNDate;
+    if (shiftConfig) {
+      const parseTimeToMinutes = (val: string) => {
+        const [h = '0', m = '0'] = val.split(':');
+        return Number(h) * 60 + Number(m);
+      };
+      const startMin = parseTimeToMinutes(shiftConfig.gio_bat_dau);
+      const endMin = parseTimeToMinutes(shiftConfig.gio_ket_thuc);
+      const endsNextDay = Boolean(shiftConfig.vat_qua_nua_dem) || endMin <= startMin;
+      if (endsNextDay) {
+        endVNDate = addDaysToVNDate(checkinVNDate, 1);
+      }
+    }
+
+    const outTimeStr = shiftConfig?.gio_ket_thuc || (inRecord.loai_ca === 'IN_LAM' ? '17:00:00' : '07:30:00');
+    const outIso = getVNDateTimeUTC(endVNDate, outTimeStr);
+
     const note = `[FORCE-OUT] Bởi ${nguoi_sua}: ${reason}`;
     const { error: insertError } = await admin.from('lich_su_cham_cong').insert({
       ma_nv: inRecord.ma_nv,
       ho_ten: inRecord.ho_ten,
       khoa_ghi_nhan: inRecord.khoa_ghi_nhan,
       loai_ca: 'OUT',
-      thoi_gian: nowIso,
+      thoi_gian: outIso,
       in_record_id: in_record_id,
       ghi_chu: note,
       is_test: is_test ?? false,
@@ -82,20 +123,8 @@ export async function POST(req: NextRequest) {
 
     if (insertError) throw insertError;
 
-    if (inRecord.loai_ca === 'IN_TRUC' && inRecord.ma_nv) {
-       // Get default shift or rotation
-       const { data: emp } = await admin.from('nhan_vien').select('loai_truc_mac_dinh').eq('ma_nv', inRecord.ma_nv).single();
-       let shiftCode = emp?.loai_truc_mac_dinh;
-       
-       // Handle 3 kíp if applicable
-       if (inRecord.ghi_chu?.includes('ca 3 kíp:')) {
-          const match = inRecord.ghi_chu.match(/ca 3 kíp: (\w+)/);
-          if (match && match[1]) shiftCode = match[1];
-       }
-       
-       if (shiftCode) {
-          await calculateAndRecordRest(admin, inRecord.ma_nv, shiftCode, nowIso, inRecord.khoa_ghi_nhan).catch(console.error);
-       }
+    if (inRecord.loai_ca === 'IN_TRUC' && inRecord.ma_nv && shiftCode) {
+      await calculateAndRecordRest(admin, inRecord.ma_nv, shiftCode, outIso, inRecord.khoa_ghi_nhan).catch(console.error);
     }
 
     return NextResponse.json({ success: true, message: 'Force check-out thành công.' });

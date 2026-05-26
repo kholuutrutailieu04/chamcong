@@ -114,11 +114,32 @@ export async function GET() {
       .map((marker) => marker.ma_nv),
   );
 
+  // 4.6 Fetch OUT records for today to detect "Ra trực" status
+  // If employee has an OUT record today linked to an IN_TRUC record, they are "Ra trực" today.
+  const { data: todayOuts } = await admin
+    .from('lich_su_cham_cong')
+    .select('id, ma_nv, in_record:in_record_id(loai_ca)')
+    .in('ma_nv', empIds)
+    .eq('loai_ca', 'OUT')
+    .gte('thoi_gian', todayStartUTC)
+    .lte('thoi_gian', todayEndUTC);
+
+  const raTrucSet = new Set<string>();
+  if (todayOuts) {
+    for (const out of todayOuts) {
+      const inRecord = out.in_record as { loai_ca: string } | null;
+      if (out.ma_nv && inRecord && inRecord.loai_ca === 'IN_TRUC') {
+        raTrucSet.add(out.ma_nv);
+      }
+    }
+  }
+
   // 5. Combine using "Actual overrides Plan"
   const staffStatus = employees.map(emp => {
     const actual = actualMap.get(emp.ma_nv);
     const plan = planMap.get(emp.ma_nv);
-    const isResting = restSet.has(emp.ma_nv);
+    const isRaTrucToday = raTrucSet.has(emp.ma_nv);
+    const isResting = restSet.has(emp.ma_nv) || isRaTrucToday;
     const isFirstDayRaTrucToday = todayFirstDayRaTrucSet.has(emp.ma_nv);
     const hasPlan = !!plan || isResting || isFirstDayRaTrucToday;
 
@@ -132,6 +153,7 @@ export async function GET() {
         display_state: actual ? 'ACTUAL' : (hasPlan ? 'PLAN' : 'NONE'),
         display_type: actual ? actual.loai_ca : (plan ? plan.loai_nghi : ((isResting || isFirstDayRaTrucToday) ? 'NGHI_BU' : null)),
         is_resting: isResting,
+        is_ra_truc: isRaTrucToday,
         is_first_day_ra_truc: isFirstDayRaTrucToday,
         has_used_first_day_ra_truc: usedFirstDayRaTrucSet.has(emp.ma_nv),
       }

@@ -66,6 +66,7 @@ type StaffStatusRecord = Pick<
     display_state: 'ACTUAL' | 'PLAN' | 'NONE';
     display_type: string | null;
     is_resting?: boolean;
+    is_ra_truc?: boolean;
     is_first_day_ra_truc?: boolean;
     has_used_first_day_ra_truc?: boolean;
   };
@@ -243,6 +244,7 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
   const [showChangePassword, setShowChangePassword] = useState(false);
   const { toastError, toastSuccess, toastWarning } = useToast();
   const [confirmedMonth, setConfirmedMonth] = useState<string>('');
+  const [dismissedMonth, setDismissedMonth] = useState<string | null>(null);
 
   const isTest = session.is_test_account ?? false;
 
@@ -258,11 +260,11 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
     const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
     const prevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
     
-    // Nếu tháng đã xác nhận khác tháng trước (và khác tháng này) thì báo động
-    const showLockWarning = confirmedMonth !== prevMonthStr && confirmedMonth !== currentMonthStr;
+    // Nếu tháng đã xác nhận khác tháng trước (và khác tháng này) và chưa chủ động xuất thì báo động
+    const showLockWarning = confirmedMonth !== prevMonthStr && confirmedMonth !== currentMonthStr && dismissedMonth !== prevMonthStr;
     
     return { currentMonthStr, prevMonthStr, showLockWarning };
-  }, [confirmedMonth]);
+  }, [confirmedMonth, dismissedMonth]);
 
   const fetchAll = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true);
@@ -300,6 +302,26 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
       clearInterval(timer);
     };
   }, [fetchAll, onLogout, session.email]);
+
+  useEffect(() => {
+    const tzDate = new Date(new Date().getTime() + 7 * 60 * 60 * 1000);
+    const currYear = tzDate.getUTCFullYear();
+    const currMonth = tzDate.getUTCMonth() + 1;
+    const prevDate = new Date(Date.UTC(currYear, currMonth - 2, 1));
+    const calculatedPrevMonthStr = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+    
+    const key = `excel_exported_${session.khoa}_${calculatedPrevMonthStr}`;
+    if (localStorage.getItem(key) === 'true') {
+      setDismissedMonth(calculatedPrevMonthStr);
+    }
+  }, [session.khoa]);
+
+  const handleExport = (targetMonth: string) => {
+    window.open(`/api/export-excel?khoa=${session.khoa}&month=${targetMonth}`, '_blank');
+    const key = `excel_exported_${session.khoa}_${targetMonth}`;
+    localStorage.setItem(key, 'true');
+    setDismissedMonth(targetMonth);
+  };
 
   const approveRotation = async (requestId: string) => {
     if (!window.confirm('Bạn có chắc chắn muốn duyệt yêu cầu này?')) return;
@@ -432,7 +454,7 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
             </div>
           </div>
           <button 
-            onClick={() => window.open(`/api/export-excel?khoa=${session.khoa}&month=${prevMonthStr}`, '_blank')}
+            onClick={() => handleExport(prevMonthStr)}
             className="px-5 py-2.5 bg-white hover:bg-slate-50 text-amber-700 rounded-xl text-sm font-bold shadow-md transition-all whitespace-nowrap"
           >
             Xuất Excel Tháng {prevMonthStr}
@@ -1202,7 +1224,7 @@ function StaffSupportSection({
                   </td>
                   <td className="p-3">
                     {st.display_state === 'ACTUAL' && <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold border border-emerald-200">{st.display_type} (Thực tế)</span>}
-                    {st.display_state === 'PLAN' && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold border border-amber-200">{st.display_type} {st.is_first_day_ra_truc ? '(Ra trực ngày đầu)' : (st.is_resting ? '(Nghỉ bù sau trực)' : '(Kế hoạch)')}</span>}
+                    {st.display_state === 'PLAN' && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold border border-amber-200">{st.display_type} {st.is_first_day_ra_truc ? '(Ra trực ngày đầu)' : (st.is_ra_truc ? '(Ra trực)' : (st.is_resting ? '(Nghỉ bù sau trực)' : '(Kế hoạch)'))}</span>}
                     {st.display_state === 'NONE' && <span className="text-slate-400 text-xs">Chưa có dữ liệu</span>}
                   </td>
                   <td className="p-3 flex gap-2 flex-wrap items-center">

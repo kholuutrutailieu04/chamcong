@@ -45,22 +45,17 @@ export async function POST(req: NextRequest) {
     // 1. Lấy thông tin request
     const { data: request } = await admin.from('yeu_cau_quan_tri').select('*').eq('id', request_id).single();
     if (!request) return NextResponse.json({ error: 'Yêu cầu không tồn tại' }, { status: 404 });
-    if (request.trang_thai !== 'PENDING') return NextResponse.json({ error: 'Yêu cầu đã được xử lý bởi người khác.' }, { status: 400 });
+    
+    // Nếu yêu cầu đã được duyệt bởi khoa khác từ trước
+    if (request.trang_thai === 'APPROVED') {
+      return NextResponse.json({ success: true, message: 'Yêu cầu đã được phê duyệt bởi khoa khác.' });
+    }
+    if (request.trang_thai !== 'PENDING') {
+      return NextResponse.json({ error: 'Yêu cầu đã được xử lý bởi người khác.' }, { status: 400 });
+    }
     if (!request.ma_khoa_dich) return NextResponse.json({ error: 'Yêu cầu thiếu mã khoa đích.' }, { status: 400 });
 
-    // 2. Chuyển trạng thái
-    const { error: updateErr } = await admin
-      .from('yeu_cau_quan_tri')
-      .update({ 
-        trang_thai: 'APPROVED', 
-        nguoi_duyet, 
-        ngay_duyet: new Date().toISOString() 
-      })
-      .eq('id', request_id);
-
-    if (updateErr) throw updateErr;
-
-    // 3. Gọi Hàm Xử Lý Dữ Liệu SQL (Cắt Timeline + Đổi dữ liệu quá khứ & ca treo)
+    // 2. Gọi Hàm Xử Lý Dữ Liệu SQL trước (Cắt Timeline + Đổi dữ liệu quá khứ & ca treo)
     // process_rotation_timeline(p_ma_nv, p_khoa_dich, p_tu_ngay, p_den_ngay, p_co_so_dich)
     const { error: rpcErr } = await admin.rpc('process_rotation_timeline', {
       p_ma_nv:      request.ma_nv,
@@ -77,6 +72,18 @@ export async function POST(req: NextRequest) {
       }
       throw new Error(rpcErr.message || 'RPC process_rotation_timeline thất bại.');
     }
+
+    // 3. Chuyển trạng thái sang APPROVED sau khi RPC thành công
+    const { error: updateErr } = await admin
+      .from('yeu_cau_quan_tri')
+      .update({ 
+        trang_thai: 'APPROVED', 
+        nguoi_duyet, 
+        ngay_duyet: new Date().toISOString() 
+      })
+      .eq('id', request_id);
+
+    if (updateErr) throw updateErr;
 
     // TODO: Gửi Broadcast PubSub bằng Websocket để ẩn dòng này trên máy người kia
     // await supabase.channel('rotation-channel').send({ type: 'broadcast', event: 'APPROVED', payload: { id: request_id } })
