@@ -285,13 +285,14 @@ function ManagerDashboard({ session, onLogout }: { session: ManagerSession; onLo
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ request_id: requestId, nguoi_duyet: session.email }),
     });
+    const result = await res.json().catch(() => ({})) as { error?: string; message?: string };
 
     if (!res.ok) {
-      toastError('Thao tác thất bại.');
+      toastError(result.error || 'Thao tác thất bại.');
       return;
     }
 
-    toastSuccess('Thao tác thành công.');
+    toastSuccess(result.message || 'Thao tác thành công.');
     void fetchAll(false);
   };
 

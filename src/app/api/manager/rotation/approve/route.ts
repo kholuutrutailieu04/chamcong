@@ -2,6 +2,24 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAdminClient } from '@/lib/supabase';
 import { requireManager } from '@/lib/auth';
 
+type RpcErrorLike = {
+  code?: string;
+  message?: string;
+  hint?: string | null;
+};
+
+function getRotationRpcErrorMessage(error: RpcErrorLike) {
+  if (error.code === 'PGRST203') {
+    return 'RPC luân chuyển bị trùng chữ ký trong Supabase. Vui lòng chạy database/process-rotation-timeline-manager-rpc.sql.';
+  }
+
+  if (error.code === 'PGRST202') {
+    return 'Thiếu RPC process_rotation_timeline_manager. Vui lòng chạy database/process-rotation-timeline-manager-rpc.sql.';
+  }
+
+  return error.message || error.hint || 'RPC process_rotation_timeline_manager thất bại.';
+}
+
 // Lấy danh sách các lệnh cần Khoa xác nhận
 export async function GET() {
   const session = await requireManager();
@@ -55,9 +73,8 @@ export async function POST(req: NextRequest) {
     }
     if (!request.ma_khoa_dich) return NextResponse.json({ error: 'Yêu cầu thiếu mã khoa đích.' }, { status: 400 });
 
-    // 2. Gọi Hàm Xử Lý Dữ Liệu SQL trước (Cắt Timeline + Đổi dữ liệu quá khứ & ca treo)
-    // process_rotation_timeline(p_ma_nv, p_khoa_dich, p_tu_ngay, p_den_ngay, p_co_so_dich)
-    const { error: rpcErr } = await admin.rpc('process_rotation_timeline', {
+    // 2. Gọi RPC wrapper để tránh lỗi PostgREST chọn nhầm overload process_rotation_timeline.
+    const { error: rpcErr } = await admin.rpc('process_rotation_timeline_manager', {
       p_ma_nv:      request.ma_nv,
       p_khoa_dich:  request.ma_khoa_dich,
       p_tu_ngay:    request.tu_ngay,
@@ -66,11 +83,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (rpcErr) {
-      const missingRpc = rpcErr.message?.toLowerCase().includes('process_rotation_timeline');
-      if (missingRpc) {
-        throw new Error('Thiếu RPC process_rotation_timeline. Vui lòng chạy migration schema mới.');
-      }
-      throw new Error(rpcErr.message || 'RPC process_rotation_timeline thất bại.');
+      throw new Error(getRotationRpcErrorMessage(rpcErr));
     }
 
     // 3. Chuyển trạng thái sang APPROVED sau khi RPC thành công

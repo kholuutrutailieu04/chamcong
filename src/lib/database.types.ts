@@ -1173,6 +1173,16 @@ export interface Database {
         }
         Returns: Json
       }
+      process_rotation_timeline_manager: {
+        Args: {
+          p_ma_nv: string
+          p_khoa_dich: string
+          p_tu_ngay: string
+          p_den_ngay?: string | null
+          p_co_so_dich?: string | null
+        }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
