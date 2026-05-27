@@ -1082,6 +1082,31 @@ function StaffSupportSection({
     }
   };
 
+  const managerCorrectAttendanceType = async (record: ManagerCorrectionRecord, targetType: 'IN_LAM' | 'IN_TRUC') => {
+    const targetLabel = targetType === 'IN_TRUC' ? 'TRỰC' : 'HÀNH CHÍNH';
+    const reason = window.prompt(`Đổi loại ca của ${record.ho_ten ?? record.ma_nv} sang ${targetLabel}?\nNhập lý do:`);
+    if (!reason?.trim()) return;
+
+    const res = await fetch('/api/manager/attendance-corrections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        record_id: record.id,
+        target_type: targetType,
+        reason: reason.trim(),
+      }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+
+    if (!res.ok) {
+      toastError(data.error || 'Lỗi đổi loại ca.');
+      return;
+    }
+
+    toastSuccess(data.message || 'Đã đổi loại ca thành công.');
+    onRefresh();
+  };
+
   const handleFirstDayRaTruc = async (emp: StaffStatusRecord) => {
     const reason = window.prompt(`Ghi nhận ra trực ngày đầu cho ${emp.ho_ten}?\nLý do/xác nhận:`);
     if (!reason?.trim()) return;
@@ -1122,7 +1147,7 @@ function StaffSupportSection({
             </h3>
             <CorrectionTable
               records={forgotCheckoutRecords}
-              onCorrect={() => {}} // Disabled here to simplify
+              onCorrect={(record, targetType) => void managerCorrectAttendanceType(record, targetType)}
               showForceCheckout
               onForceCheckout={managerForceCheckout}
             />
