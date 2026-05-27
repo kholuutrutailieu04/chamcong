@@ -1171,6 +1171,9 @@ function StaffSupportSection({
             {filteredStaff.map(emp => {
               const st = emp.status;
               const isDim = st.display_state !== 'NONE';
+              const actualBadgeClass = st.display_type === 'IN_TRUC'
+                ? 'bg-indigo-50 text-indigo-700 border-indigo-300'
+                : 'bg-emerald-100 text-emerald-700 border-emerald-200';
               return (
                 <tr key={emp.ma_nv} className={`hover:bg-slate-50 transition-colors ${isDim ? 'opacity-60 bg-slate-50' : ''}`}>
                   <td className="p-3">
@@ -1178,7 +1181,7 @@ function StaffSupportSection({
                     <p className="font-mono text-xs text-slate-500">{emp.ma_nv}</p>
                   </td>
                   <td className="p-3">
-                    {st.display_state === 'ACTUAL' && <span className="bg-emerald-100 text-emerald-700 px-2 py-1 rounded text-xs font-bold border border-emerald-200">{st.display_type} (Thực tế)</span>}
+                    {st.display_state === 'ACTUAL' && <span className={`px-2 py-1 rounded text-xs font-bold border ${actualBadgeClass}`}>{st.display_type} (Thực tế)</span>}
                     {st.display_state === 'PLAN' && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded text-xs font-bold border border-amber-200">{st.display_type} {st.is_first_day_ra_truc ? '(Ra trực ngày đầu)' : (st.is_ra_truc ? '(Ra trực)' : (st.is_resting ? '(Nghỉ bù sau trực)' : '(Kế hoạch)'))}</span>}
                     {st.display_state === 'NONE' && <span className="text-slate-400 text-xs">Chưa có dữ liệu</span>}
                   </td>
